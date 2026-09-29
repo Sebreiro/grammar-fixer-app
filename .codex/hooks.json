@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/usr/bin/node\" \"/workspace/.codex/hooks/gsd-check-update.js\""
+          }
+        ]
+      }
+    ]
+  }
+}

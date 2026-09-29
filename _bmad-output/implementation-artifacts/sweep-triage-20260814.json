@@ -1,0 +1,941 @@
+{
+  "workflow": "deferred-sweep-triage",
+  "open_ids": [
+    "DW-2",
+    "DW-3",
+    "DW-5",
+    "DW-6",
+    "DW-7",
+    "DW-8",
+    "DW-9",
+    "DW-10",
+    "DW-12",
+    "DW-13",
+    "DW-14",
+    "DW-15",
+    "DW-16",
+    "DW-17",
+    "DW-19",
+    "DW-20",
+    "DW-21",
+    "DW-22",
+    "DW-23",
+    "DW-24",
+    "DW-25",
+    "DW-26",
+    "DW-27",
+    "DW-28",
+    "DW-29",
+    "DW-30",
+    "DW-31",
+    "DW-32",
+    "DW-33",
+    "DW-34",
+    "DW-35",
+    "DW-36",
+    "DW-37",
+    "DW-38",
+    "DW-39",
+    "DW-40",
+    "DW-41",
+    "DW-42",
+    "DW-43",
+    "DW-44",
+    "DW-45",
+    "DW-46",
+    "DW-47",
+    "DW-48",
+    "DW-49",
+    "DW-50",
+    "DW-51",
+    "DW-52",
+    "DW-53",
+    "DW-54",
+    "DW-55",
+    "DW-56",
+    "DW-57",
+    "DW-58",
+    "DW-59",
+    "DW-60",
+    "DW-61",
+    "DW-62",
+    "DW-63",
+    "DW-64",
+    "DW-65",
+    "DW-66",
+    "DW-67",
+    "DW-68",
+    "DW-69",
+    "DW-70",
+    "DW-71",
+    "DW-72",
+    "DW-73",
+    "DW-74",
+    "DW-75",
+    "DW-76",
+    "DW-77",
+    "DW-78",
+    "DW-79",
+    "DW-80",
+    "DW-81",
+    "DW-82",
+    "DW-83",
+    "DW-84",
+    "DW-85",
+    "DW-86",
+    "DW-87",
+    "DW-88",
+    "DW-89",
+    "DW-90",
+    "DW-91",
+    "DW-92",
+    "DW-93"
+  ],
+  "already_resolved": [
+    {
+      "id": "DW-3",
+      "evidence": "lib/src/ui/panel/correction_panel.dart:263 `bool get _canCorrect => _state.editorText.trim().isNotEmpty;`, gating the button at :323 (`onCorrect: _canCorrect ? _correct : null`) and rendered disabled at lib/src/ui/panel/original_text_pane.dart:109. Two rows cover it (empty seed and a whitespace-only seed) and the whitespace row is mutation-verified. The Ctrl+Enter accelerator deliberately stays ungated because correction_controller.dart:131 refuses a blank submit for every caller."
+    },
+    {
+      "id": "DW-17",
+      "evidence": "lib/main.dart:240 `graph.applyStartupBindOutcome(await startup.bindHotkey(tray: tray))`, routed through lib/src/application/composition/daemon_graph.dart:61-76 to `SettingsController.applyStartupOutcome`. The outcome is no longer discarded; the unused `initialBindOutcome` constructor seam is now a documented deliberate absence at lib/src/application/settings_controller.dart:45-46."
+    },
+    {
+      "id": "DW-47",
+      "evidence": "This entry exists only to record that DW-3's affordance shipped, and it has: lib/src/ui/panel/correction_panel.dart:263 and :323. DW-3 is closed in this same result, so nothing further is owed."
+    },
+    {
+      "id": "DW-58",
+      "evidence": "lib/src/ui/panel/correction_panel.dart:78-81 `static double minimumPanelHeightFor(TextScaler textScaler) => minimumPanelHeight * textScaler.scale(_measuredAtFontSize) / _measuredAtFontSize;`, called with `MediaQuery.textScalerOf(context)` at :292-294; test/ui/panel/correction_panel_layout_test.dart:359 drives `TextScaler.linear(1.5)` and :384 asserts a full editor line. The entry's claim \u2014 that the floor is a constant and nothing reads MediaQuery.textScaler \u2014 is no longer true. The residual 'the floor is a widget-side stand-in for a window constraint' half is DW-61's and stays open in the panel-window-geometry bundle."
+    },
+    {
+      "id": "DW-83",
+      "evidence": "The entry's own deliverable was the missing ledger record of an unrecorded seam, and the seam is verified present and sound: lib/src/application/panel_controller.dart:59 `Stream<void> get showRequests`, fed at :105, closed at :154, consumed at lib/src/ui/daemon_home.dart:90-99, pinned by four rows in panel_controller_test.dart. The entry itself states nothing is owed technically."
+    }
+  ],
+  "bundles": [
+    {
+      "name": "spine-currency-refresh",
+      "dw_ids": [
+        "DW-2",
+        "DW-7",
+        "DW-24",
+        "DW-41",
+        "DW-56",
+        "DW-65",
+        "DW-90"
+      ],
+      "intent": "Bring ARCHITECTURE-SPINE.md into agreement with the code that shipped and was reviewed against it, amending the spine and never the code. Six divergences are verified present: AD-9 still declares `Future<HotkeyRegistration> bind(...)` (spine:264) where lib/src/domain/hotkey/global_hotkey.dart:63 returns the sealed `HotkeyBindOutcome`; AD-9's `GlobalHotkey` block (spine:259-267) shows three members where the port declares a fourth, `bindingChanges` (global_hotkey.dart:55); the AD-2 and AD-9 verbatim blocks omit the `operator==`/`hashCode` members all five value types now carry (preset.dart:18, suggestion.dart:13, correction_event.dart:35, hotkey_binding.dart:16, global_hotkey.dart:21); AD-9's `<Ctrl><Shift>g` illustration (spine:270) is not what GTK produces and no Dart under lib/ builds an accelerator at all; the Capability to Architecture map (spine:549, :555) places CAP-4 and CAP-11 in ui/panel and domain only, while correction_controller.dart:179 and :208 own both behaviours; and AD-17 names application/composition/ as the composition root while startup, teardown and AD-5 pair resolution live in main.dart, daemon_startup.dart, daemon_lifecycle.dart and active_correction.dart:17. Also give the claude_agent_sdk pin one home: have the Stack table (spine:406) cite assets/sidecar/requirements.txt rather than restating 0.2.132, and do the same for the Flutter row that .github/workflows/ci.yml hand-copies, keeping test/architecture/sidecar_pin_drift_test.dart green either way. The spine carries no <frozen-after-approval> block and every one of these divergences was accepted by a story-time review; record each amendment and its authority in the spine's own change log."
+    },
+    {
+      "name": "daemon-shutdown-completeness",
+      "dw_ids": [
+        "DW-12",
+        "DW-19",
+        "DW-37"
+      ],
+      "intent": "Close the three paths where the daemon's ordered startup and teardown is bypassed or drops work. Give the window's own close path a route into DaemonLifecycle.shutdown(): main.dart:446-450 hangs teardown off sigint/sigterm/sighup only, there is no setPreventClose and no WindowListener anywhere in lib/, so a window-manager close skips AppDatabase.close() and abandons a history write in flight (CAP-7). Buffer the show requests that SingleInstanceLock.acquire() starts serving immediately (single_instance_lock.dart:79-80 unbuffered broadcast controller, emitting at :204) so a second launch landing before DaemonLifecycle.start() subscribes (daemon_lifecycle.dart:101-113) is drained rather than lost -- a double-click on a launcher reaches that window. And pass the nullable graph into `_releaseWithoutLifecycle` (main.dart:331-364) so an abort partway through DaemonGraph.build() disposes the controllers and the container first, in the same order the lifecycle uses, instead of closing `changes` under a live subscriber and the database under an undrained controller. Keep every existing ordering assertion and its mutation gate green."
+    },
+    {
+      "name": "config-warning-error-typing",
+      "dw_ids": [
+        "DW-23"
+      ],
+      "intent": "Stop the composition root's first startup path from breaking the Logger port's own rule against logging an error's toString(). lib/src/infrastructure/config/json_config_store.dart:144 composes 'could not be read ($error)' with a raw exception interpolated in, the same shape recurs at :169-170, and lib/src/infrastructure/system/daemon_startup.dart:96-98 forwards that message straight to logger.warning. Change ConfigLoadResult so it carries the error's type separately from the human-readable message, and have the startup path pass it as `context: {'error_type': ...}` the way every other guard added in that story does. The payloads are filesystem exceptions today, so this is hygiene rather than a privacy defect -- the point is that the idiom is not copied to a path where the exception carries user text."
+    },
+    {
+      "name": "pin-main-residue",
+      "dw_ids": [
+        "DW-8"
+      ],
+      "intent": "Shrink lib/main.dart's `main()` to the smallest shell that no test can execute. Roughly 25 executable statements still live inline between main.dart:39 and :153, and the only test naming main.dart (test/architecture/composition_wiring_test.dart:8) reads it as source text rather than running it. Move every remaining decision behind the seams that are already covered and mutation-verified -- DaemonStartup, DaemonGraph, DaemonLifecycle -- and for whatever genuinely cannot move (binding initialisation, the exit calls), extend composition_wiring_test.dart's source-level assertions so a change to the residue fails a test rather than passing silently. Do not restructure the seams themselves: whether the composition root should live in application/composition/ at all is DW-24's question and is handled in the spine-currency bundle."
+    },
+    {
+      "name": "first-frame-readiness",
+      "dw_ids": [
+        "DW-22"
+      ],
+      "intent": "Restore the readiness signal that AD-8's hidden-window fix removed. Deleting the stock `first-frame` handler from linux/runner/my_application.cc stopped the toplevel being shown and also left nothing in the process observing that the engine produced a frame, so `_finishStartup` returns -- and startup.bindHotkey runs, and CAP-1's 'the window is warm before the first toggle' claim is made -- with `gtk_widget_realize` as the only evidence, which is weaker than a rendered frame. Either keep a first-frame handler that records readiness without showing anything, or await `WidgetsBinding.instance.endOfFrame` before binding the hotkey, and pin the choice with a test. Nothing added here may map or show the toplevel: test/architecture/hidden_window_test.dart must stay green, including its window_manager call allowlist."
+    },
+    {
+      "name": "xvfb-runtime-observations",
+      "dw_ids": [
+        "DW-9",
+        "DW-26",
+        "DW-44"
+      ],
+      "intent": "Make the runtime observations these three entries owe, using the headless X server that is now available on this machine: /usr/bin/Xvfb and /usr/bin/xvfb-run both exist, which every one of these entries was filed believing they did not, so their skip reasons are stale. Stand up a fresh Xvfb display (the sockets already under /tmp/.X11-unix answer 'Authorization required' and must not be used), build the Linux binary and launch it, then observe what a bare X server genuinely supports: that no window is mapped at startup and the process stays resident and a second launch exits 0 (DW-9); that the panel maps and unmaps on toggle and the double-press sequence behaves as the fake models it (DW-26); and that keybinder takes a real grab and a synthesised press reaches the daemon inside CAP-1's budget (DW-44). Record every result including failures, and convert each unconditionally-skipped live test -- test/platform/x11_hotkey_live_test.dart:14, test/platform/panel_visibility_live_test.dart:14, test/architecture/hidden_window_test.dart:286 -- into a row that runs when a display is available and skips with an accurate reason when it is not. Where a claim truly needs a compositor or a window manager that Xvfb cannot provide (focus-stealing prevention, CAP-14's focus-loss hide), narrow that entry's remaining claim to exactly that rather than closing it. Never report an unobserved claim as observed."
+    },
+    {
+      "name": "panel-visibility-event-reconciliation",
+      "dw_ids": [
+        "DW-25",
+        "DW-31",
+        "DW-32",
+        "DW-33",
+        "DW-35",
+        "DW-36"
+      ],
+      "intent": "Rework lib/src/infrastructure/panel/window_manager_panel_visibility.dart so its reconciliation stops discarding events it cannot have caused and stops acting on events it never received. The single `_outstanding > 0` gate at :210-215 covers all five arms, so `minimize` and `close` -- which the adapter's only platform calls (show, hide, focus) can never produce -- are dropped along with genuine echoes; a discarded `close` is unrecoverable because the toplevel is destroyed. Latch a blur suppressed during an outstanding request (:221-225) and re-evaluate it when `_outstanding` reaches zero, re-checking `_visible` then, so a genuine dismissal during a show of an already-visible panel is not simply lost. Track the `focus` event the switch at :166-197 ignores entirely and require focus to have been held before `_onBlur` hides, so a focus-out from a window manager that mapped the window without granting keyboard focus cannot take down the panel the user just asked for. Add the `onDone` backstop the subscription at :47-58 lacks, with the same AD-15 rationale its `onError` already carries. Finally, state on `PanelVisibility.show`/`hide` (lib/src/domain/panel/panel_visibility.dart:14-15) that the returned future means the intent was accepted rather than that the window moved, and record in the adapter's class doc which events are echo-capable and which are structurally external -- the assumption DW-25 names, which the new rows should pin against test/fakes/fake_panel_window.dart."
+    },
+    {
+      "name": "clipboard-absence-not-failure",
+      "dw_ids": [
+        "DW-34"
+      ],
+      "intent": "Make SystemClipboard honour ClipboardPort.readText's own promise that an empty clipboard is a modelled value and never a failed read. lib/src/infrastructure/clipboard/system_clipboard.dart:25-26 delegates straight to `Clipboard.getData`, whose Flutter implementation ends in a non-null cast, so a platform reply of `{'text': null}` throws a TypeError before `data?.text` is evaluated and CAP-2 logs a read failure for an ordinary empty clipboard. Catch that specific shape and answer null while leaving every other failure a failure, and add the row the suite is missing -- it currently mocks only the top-level-null shape, so the contract is verified for one of the two shapes a platform can send. If the Xvfb runtime work establishes which shape the Linux embedder actually sends, record that evidence beside the guard rather than leaving it defensive."
+    },
+    {
+      "name": "panel-window-geometry",
+      "dw_ids": [
+        "DW-50",
+        "DW-53",
+        "DW-61",
+        "DW-72"
+      ],
+      "intent": "Give the panel's toplevel a size, and move the height floor from the widget to the window. Nothing sizes the window today -- main.dart:419-424 calls only ensureInitialized, setTitle and setSkipTaskbar, and test/architecture/hidden_window_test.dart:364-368 allowlists exactly those three -- so CAP-10's 'readable at the same time' is verified only at surfaces a test chose, and a user can drag the window below the floor and get a scrolling panel instead of a side-by-side one. Set an initial size and a minimum size derived from CorrectionPanel.minimumPanelHeightFor (correction_panel.dart:78-81), amend the hidden_window_test allowlist deliberately with the reason recorded in the test, and keep the widget-side floor as the fallback it is rather than deleting it. Settle the settings affordance at the same time: lib/src/ui/daemon_home.dart:173-185 overlays it at `Positioned(top: 0, right: 0)` over a corner the editor's TextField also spans, so a pointer landing there activates settings instead of focusing the editor -- either inset it clear of the field or reserve the corner in the panel's layout and re-measure the floor. Use the Xvfb display now available on this machine to look at the result rather than choosing a number blind."
+    },
+    {
+      "name": "explicit-fresh-session-marker",
+      "dw_ids": [
+        "DW-54"
+      ],
+      "intent": "Carry 'a new session began' as a signal rather than inferring it from a value. lib/src/application/correction_state.dart:84 defines `bool get isFreshSession => this == empty;`, which is the same value comparison the entry filed against, only named -- so an idle session whose editor a user clears by hand is indistinguishable from a fresh summon, and both consumers key behaviour off it (correction_panel.dart:214 re-requests editor focus, daemon_home.dart:110 returns to the panel view). Add an explicit marker set only by CorrectionController._beginSession -- a session counter or a dedicated field -- and have both consumers read that. The consequence today is benign (a redundant focus request that is already a no-op); the point is that the inference stops being safe the moment anything else keys off it, and DaemonHome's view swap already does."
+    },
+    {
+      "name": "copy-success-affordance",
+      "dw_ids": [
+        "DW-59"
+      ],
+      "intent": "Give a successful copy something to render, so a working clipboard and a hung write stop looking identical. `copySuggestion` emits no state on success beyond `_clearCopyFailure` (correction_controller.dart:246), CorrectionState carries only `copyFailure`, and the panel renders only that notice (correction_panel.dart:369-404) -- so a `ClipboardPort.writeText` that never resolves produces exactly the same nothing as one that worked, and the user pastes stale content believing it is the variant they pressed. Add a short-lived inline confirmation in the panel's existing live region, or a per-card 'copied' state, staying inside CAP-13's constraint that this surface renders no toast, snackbar or dialog. Cover both the success path and the never-resolves path with rows, and keep DW-55's newest-verdict-wins token behaviour intact."
+    },
+    {
+      "name": "ad1-gate-allowlist",
+      "dw_ids": [
+        "DW-60",
+        "DW-75"
+      ],
+      "intent": "Replace the AD-1 ui symbol gate's substring denylist with a form that cannot be walked around. `_bannedUiSymbols` (test/architecture/ad1_import_rule_test.dart:495-501) is a plain `contains` scan over comment-stripped source text against a hand-enumerated list at :504, and three independent bypasses were found and closed in three consecutive review passes -- that recurrence, not any one hole, is the finding. Build the allowlist form instead (the ui ring may name these platform symbols and no others) or an analyzer-level rule over resolved element URIs, keeping the existing checker self-tests, `_uiSanctionedProviders` (:578), `_knownPortSeamCount` (:569) and the seam-classification row all working. Extend the same coverage to what story 10 added and the gate never grew to see: the settings widgets are the first ui files to render config values and adapter-authored sentences, and the manual inspection that currently covers that case runs nowhere."
+    },
+    {
+      "name": "ci-runs-flutter-test",
+      "dw_ids": [
+        "DW-29",
+        "DW-51",
+        "DW-74"
+      ],
+      "intent": "Put the test directories that no automated gate covers into one. dart_test.yaml names no test paths at all (only the live-tag skip block and `concurrency: 1`), and .github/workflows/ci.yml:96-99 runs only `dart test --exclude-tags=live` over test/application, test/architecture, test/domain, test/infrastructure and test/fakes_smoke_test.dart -- so test/platform/, test/ui/ and test/composition/ exist on disk, are discovered by convention, and are run by nothing. Add a `flutter test` step to the workflow that covers them; adding test/ui to the `dart test` list cannot work, because those rows need a Flutter binding. That is where the only proof of the MethodChannel routing and call sequences, CAP-2's re-seed reaching a widget, CAP-4's digit keys, CAP-11's copy button, CAP-13's inline error and AD-10's regime statement lives. Land this after or with the socket-suite flake fix, since a flaky mandatory gate is worse than no gate."
+    },
+    {
+      "name": "retire-socket-suite-flakes",
+      "dw_ids": [
+        "DW-46"
+      ],
+      "intent": "Retire the two cross-suite flakes that `concurrency: 1` did not. test/infrastructure/hotkey/wayland_portal_global_hotkey_test.dart:52 tears down an in-process DBusServer through portal.stop (test/support/fake_global_shortcuts_portal.dart:407-430) and test/infrastructure/system/single_instance_lock_test.dart:27 tears down an abstract-namespace socket through lock.dispose (single_instance_lock.dart:120-123); both await a `close()` that does not wait for the kernel to actually free the address, so the next suite in the same process can start before it is released. Give each teardown a wait that confirms release, or collapse both socket-binding suites into one file, then prove it by running the scoped binding-free command several consecutive times and reporting every result rather than the first green one. This matters beyond flakiness: any mutation-verification claim drawn from a single full-suite run is unsound while a false red is possible."
+    },
+    {
+      "name": "ffi-keybinder-hotkey-registrar",
+      "dw_ids": [
+        "DW-39",
+        "DW-40",
+        "DW-42",
+        "DW-43"
+      ],
+      "intent": "Replace the X11 hotkey path's dependency on hotkey_manager_linux with a direct dart:ffi binding to libkeybinder-3.0 -- the remedy all four entries independently name. The pinned plugin discards keybinder_bind's gboolean and answers `true` unconditionally (hotkey_manager_linux-0.2.0/linux/hotkey_manager_linux_plugin.cc:96-99), so AD-10's 'a failed grab must not report success' is unsatisfiable through it and the commonest real failure -- another client already owns the combination -- reaches the user as a working shortcut, a green tray and a settings screen showing a key that does nothing. The same file reads an uninitialised `const char*` on a map-lookup miss in both handle_key_down (:35-49) and hkm_unregister (:106-115): undefined behaviour in a process designed to stay resident all day. Computing the keyval directly also closes the seven labels that currently reach keybinder as keypad, ISO or 3270 keyvals instead of the ordinary ones (hotkey_key_catalogue.dart:134-142, observed values pinned at test/platform/hotkey_manager_registrar_test.dart:199-212), and loading the library with DynamicLibrary.open turns a missing libkeybinder-3.0.so.0 from a dynamic-loader failure before main() into a caught error that degrades one capability visibly -- which is what the spine's Operational envelope already claims happens. Keep the HotkeyRegistrar seam and every existing refusal-path row green, leave the Wayland portal adapter untouched, and update the Stack table's package row with the change."
+    },
+    {
+      "name": "hotkey-availability-fanout",
+      "dw_ids": [
+        "DW-69",
+        "DW-79"
+      ],
+      "intent": "Make both of AD-12's named consumers hear about an unavailable hotkey, not just whichever surface happens to be open. daemon_startup.dart:184 is the only caller of TrayPort.setHotkeyUnavailable in lib/ and it runs once, so a rebind the backend refuses and a ShortcutsChanged whose list no longer holds the shortcut both reach the settings screen and nothing else -- the tray keeps showing the available artwork and a menu asserting the hotkey works. Put a subscription in the composition root that keeps both surfaces downstream of one value (GlobalHotkey.bindingChanges is the honest source for the compositor-initiated half) rather than giving SettingsController a second port and a second responsibility; the entries name that as the better of the two shapes. Add the row that would have caught this and does not exist even for startup: drive one outcome and assert both surfaces."
+    },
+    {
+      "name": "settings-mutation-generation-stamp",
+      "dw_ids": [
+        "DW-76",
+        "DW-77"
+      ],
+      "intent": "Give SettingsController the mutation-generation stamp it states outright it does not have (settings_controller.dart:204-206). The in-flight slot now lives on the controller (:123 `_mutating`, :214 `_beginMutation`, :251 `_endMutation`, surfaced as SettingsState.mutationInFlight) and refuses a second mutation, which closes every interleaving a user can cause from this screen -- but a config file edited on disk, a second surface, or a bindingChanges emission arriving mid-mutation is still last-completion-wins. Stamp each mutation and discard the result of any that is no longer current. Settle the counted-echo bookkeeping in the same change, as both entries ask: `_ownWrites` is a `Map<AppConfig, int>` (:111) whose multiplicity half is unreachable through the public API now that one mutation is in flight at a time -- either simplify it to a Set and record the refusal rule as its premise, or keep the counting and pin what makes it load-bearing."
+    },
+    {
+      "name": "unavailable-message-contract",
+      "dw_ids": [
+        "DW-82"
+      ],
+      "intent": "Make A6's 'the tray menu still opens the panel' clause a contract that something enforces. lib/src/ui/settings/hotkey_status_view.dart:126-130 renders HotkeyUnavailable.message verbatim and appends nothing, which is AD-12's letter and is what stopped the clause printing twice -- but it leaves the promise depending on every adapter remembering to end its sentence with it. It holds today across both adapters and daemon_startup.dart, and is proven for exactly one hard-coded fixture message. Write the contract into the GlobalHotkey port's doc where HotkeyUnavailable is declared, and add a gate over the adapters' unavailable messages that fails when a new branch omits the clause. If matching message literals to their constructor proves too fragile across dart format wrapping, take the other option instead -- move the clause onto the screen and remove the adapters' copies -- but pick one and make it enforced rather than conventional."
+    },
+    {
+      "name": "sidecar-import-guard-coverage",
+      "dw_ids": [
+        "DW-93"
+      ],
+      "intent": "Bring the sidecar's providerUnavailable import guard into the routine gate. It lives at assets/sidecar/claude_agent_sdk_sidecar.py:83-84 and is reached only by the second row of a @Tags(['live']) file (test/infrastructure/correction/claude_agent_sdk/claude_agent_sdk_sidecar_live_test.dart:95-119), which every default run excludes and which additionally skips unless a stock interpreter that cannot import claude_agent_sdk happens to exist at /usr/bin/python3. It is the failure a user with an unprovisioned host actually hits, so its message quality matters most in the panel, and it is cheap to reach -- it needs no CLI and no network. Extend the fake-CLI harness with an SDK-free interpreter view (an empty PYTHONPATH view plus isolated mode is the plausible shape) rather than installing or mutating anything on the host, and run the guard in the default gate."
+    },
+    {
+      "name": "deferred-followup-reviews",
+      "dw_ids": [
+        "DW-6",
+        "DW-38",
+        "DW-45",
+        "DW-64",
+        "DW-86"
+      ],
+      "intent": "Run the independent follow-up review that five stories' review passes recommended and the damping cap (limits.max_followup_reviews = 1) prevented. The stories are 3 (controller failure contract), 6 (tray adapter), 8 (Wayland portal hotkey adapter), 9 (correction panel UI) and 10 (settings UI); all are status: done with verify green, and none of these five entries names a defect -- each preserves only the lingering recommendation. Review the shipped code for those five stories against their specs, fix what is clearly and narrowly wrong, and file anything larger as new ledger entries rather than widening this pass. Do not re-open the stories and do not edit their spec files."
+    }
+  ],
+  "blocked": [],
+  "skip": [
+    {
+      "id": "DW-10",
+      "reason": "A record of a deliberate substitution, not a defect. main.dart:388-405 still builds `ProviderContainer(overrides:)` installed through `UncontrolledProviderScope` (main.dart:166) rather than `ProviderScope(overrides:)`, because two of story 4's own acceptance criteria require main to hold the container -- eager controller reads so the first show is not the event that creates the listener, and disposal in a specified order. The code is correct as shipped and the divergence from the literal task text is now on the record; nothing is buildable."
+    },
+    {
+      "id": "DW-15",
+      "reason": "A Dart SDK hazard for test authors, not a defect in this code. single_instance_lock.dart:103 binds exactly one address for the process's whole life, so the different-path rebind case is unreachable in the daemon, and the catch at :109-113 already documents why it deliberately does not branch on errno. The workaround is recorded in the lock's source and in the suites that need two live locks; DW-46 carries the correction to this entry's false claim that it retired the full-suite flakes."
+    },
+    {
+      "id": "DW-48",
+      "reason": "Duplicate of DW-30. This entry is story 9's record that DW-30's question was answered 'unchanged behaviour', and the live question -- whether a restore-sourced `true` should re-seed the editor from the clipboard -- is triaged as a decision on DW-30. Both name the same missing port distinction between 'the window came back' and 'a new session starts' (panel_visibility.dart:12 exposes only `Stream<bool> changes`); nothing separate is owed here."
+    },
+    {
+      "id": "DW-49",
+      "reason": "Superseded by DW-35. The entry records that DW-35's prediction did not come true, and that is verified: correction_panel.dart names neither `show()` nor `hide()`, and the panel renders controller state driven by `changes` rather than by any future. The contract question it explicitly leaves open belongs to DW-35 and is carried in the panel-visibility-event-reconciliation bundle."
+    },
+    {
+      "id": "DW-63",
+      "reason": "A self-contained correction whose own numbers are already stale again: test/ui/ now carries 116 testWidgets rows, not the 28 DW-51 states or the 34 a later pass repeated. DW-51's substance is untouched and is triaged in the ci-runs-flutter-test bundle. The lesson the entry names -- a durable entry should describe what is true structurally rather than how many rows there were that afternoon -- is recorded by the entry itself; there is nothing to build."
+    },
+    {
+      "id": "DW-70",
+      "reason": "Superseded by DW-16. The half this entry describes as done has shipped -- preset_choice_list.dart states on screen that a preset change is saved immediately and takes effect after a restart -- and the remaining question, whether CAP-8 needs the immediacy its wording implies, is DW-16's and is triaged there as a decision, together with the DW-62 interaction this entry correctly flags."
+    },
+    {
+      "id": "DW-73",
+      "reason": "A record about a completed story's verification text. Story 10 is done and 10-settings-ui.md:289 ('C2 and A9 must fail') will not be re-run, so there is nothing in this repo to change. The general point -- a mutation gate that names rows on both sides of a port seam asserts something the seam exists to prevent, and the honest form is one gate per side -- belongs to whoever authors the next gate, not to this codebase."
+    },
+    {
+      "id": "DW-80",
+      "reason": "Subsumed by DW-66. The mechanism is real and verified: wayland_portal_global_hotkey.dart:871-878 emits on the rebind branch and the drop branch does change the screen (pinned by A9 and C2). What makes the rebind branch invisible on a real session is exactly DW-66's `effective: null` gap -- the portal supplies only a localized trigger_description and nothing parses it -- and that is triaged as a decision on DW-66."
+    },
+    {
+      "id": "DW-91",
+      "reason": "Nothing is owed. The fix shipped and is verified: assets/sidecar/claude_agent_sdk_sidecar.py:182-183 closes the SDK generator deterministically with `await close_quietly(messages)` in a finally, and the guard against an upstream reintroduction is the stderr-empty row at test/infrastructure/correction/claude_agent_sdk/sidecar_fake_cli_test.dart:61-76. The entry itself states no action is required unless that row goes red; the two unexercised close_quietly arms were verified by direct probe and would need a seam the SDK does not offer."
+    },
+    {
+      "id": "DW-92",
+      "reason": "A note for whoever bumps the pin rather than deferred work. Both private-protocol dependencies are verified still present and both are forced rather than chosen: test/support/fake_claude_cli.dart:254-266 builds the `_bundled`-free package view because the linux wheel's bundled CLI is consulted before PATH, and test/support/fake_claude_cli/claude.py:75-85 hand-answers the initialize control request because the SDK otherwise blocks up to 60 s. The version is pinned and drift-checked (DW-90), and the discovery row fails loudly on a change; nothing is buildable until an SDK bump is actually attempted."
+    }
+  ],
+  "decisions": [
+    {
+      "id": "DW-5",
+      "question": "Should the frozen I/O & Edge-Case Matrix in spec-application-layer-controllers.md be amended to carry story 3's error contract, or should the spec point at story 3 instead?",
+      "context": "The spec's matrix still reads `N/A` under Error Handling for 12 of its 13 rows, and it sits inside `<frozen-after-approval reason=\"human-owned intent -- do not modify unless human renegotiates\">` at lines 13-63 of that file. Story 3's Part A restates all 13 rows verbatim and replaces each `N/A`, so the contract exists -- it just is not where a reader starting from the spec will look. Amending the block is a human renegotiation by the block's own terms.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Amend the frozen matrix",
+          "effect": "build",
+          "intent": "Replace each `N/A` Error Handling cell in spec-application-layer-controllers.md's I/O & Edge-Case Matrix with the corresponding row from story 3's Part A, verbatim and in the same row order, keeping the frozen block's marker and recording the renegotiation date and authority inside the block."
+        },
+        {
+          "key": "2",
+          "label": "Point at story 3 instead",
+          "effect": "build",
+          "intent": "Leave every cell inside the frozen block untouched and add one sentence immediately above it naming story 3's Part A matrix as the live error contract for these rows, so a reader starting from the spec is not misled."
+        },
+        {
+          "key": "3",
+          "label": "Close -- story 3 is the contract",
+          "effect": "close",
+          "resolution": "The contract exists, is complete and is discoverable from the story; the spec is `status: done` and is not the working document."
+        }
+      ],
+      "recommendation": "2"
+    },
+    {
+      "id": "DW-13",
+      "question": "Where should the ledger's append-only rule be enforced so a story's Tasks line stops instructing deletion of closed entries?",
+      "context": "`.claude/skills/bmad-loop-sweep/deferred-work-format.md` states the ledger is append-only and that a closed item takes `status: done <date>` rather than deletion, yet stories 2 and 4 were both instructed to delete the entries they closed, and both did. The entry's own conclusion is that the root cause is upstream, in whatever authors the Tasks line, not in an executor's judgement. The MVP epic is complete, so no further Tasks lines will be authored for it.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Fix the story-authoring skill",
+          "effect": "build",
+          "intent": "Add an explicit rule to the skill that authors story Tasks lines forbidding any instruction to delete deferred-work entries, requiring `status: done <date>` instead, and citing deferred-work-format.md as the authority."
+        },
+        {
+          "key": "2",
+          "label": "Close -- epic finished",
+          "effect": "close",
+          "resolution": "No further story Tasks lines will be authored for this epic, and the four deleted entries were verified genuinely closed at the time."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-14",
+      "question": "Should the single-instance check move into the C++ runner so a second launch never constructs a GTK window at all?",
+      "context": "linux/runner/my_application.cc:20-21 builds the GtkWindow and :71 realizes the FlView before the Dart entrypoint runs, and the app is registered `G_APPLICATION_NON_UNIQUE` at :144, so a second launch has a realized -- never mapped, never shown -- toplevel for the milliseconds between engine start and `exit(0)`. main() does acquire the AD-14 lock before loading config, opening the database or touching windowManager, and does call exit(0). Avoiding even the realized window means a GApplication-uniqueness design in C++, a different mechanism from AD-14's socket.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Move the check into C++",
+          "effect": "build",
+          "intent": "Give the runner GApplication uniqueness (or G_APPLICATION_HANDLES_COMMAND_LINE) so a second launch exits before any GtkWindow or FlView is constructed, and reconcile it with AD-14's socket so there is one instance authority rather than two."
+        },
+        {
+          "key": "2",
+          "label": "Close -- nothing is displayed",
+          "effect": "close",
+          "resolution": "The toplevel is never mapped and is torn down within milliseconds; nothing is displayed and nothing is leaked, and the only inaccuracy is the wording of one I/O matrix row."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "2"
+    },
+    {
+      "id": "DW-16",
+      "question": "Should the active (provider, preset) pair become live so a preset switch serves the next correction, or does CAP-8 stay satisfied by a documented restart?",
+      "context": "main.dart:400-403 binds activeCorrectionProviderProvider and activePresetProvider with constant `overrideWithValue`, and controller_providers.dart:26-27 watches them -- a constant override never invalidates, so CorrectionController holds one pair for the life of the process while `changeActivePreset`'s doc promises it serves the next correction. Story 10 took the documentation route: preset_choice_list.dart states the restart requirement on screen (DW-70). Making the seams mutable rebuilds correctionControllerProvider, which is exactly the condition DW-62 says the panel is not written for, so the two must land together.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Make the active pair live",
+          "effect": "build",
+          "intent": "Derive activePresetProvider and activeCorrectionProviderProvider from configStoreProvider so a config change rebuilds correctionControllerProvider; re-bind CorrectionPanel with ref.listen so it cannot hold a disposed controller (DW-62), and drop the restart notice from preset_choice_list.dart (DW-70). Add rows that drive a preset switch and assert the next correction uses the new provider."
+        },
+        {
+          "key": "2",
+          "label": "Keep the restart requirement",
+          "effect": "close",
+          "resolution": "AD-5 puts pair resolution in the composition root, the screen states the restart plainly (A16), and the user is no longer misled -- CAP-8 is satisfied by a documented restart."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-20",
+      "question": "How long may a single teardown step take before the daemon abandons it and exits?",
+      "context": "daemon_lifecycle.dart:245-256 wraps `await run()` in try/catch with no timeout, which guards a step that throws and does nothing for one that never completes -- and two can: `_disposeControllers` awaits CorrectionController.dispose()'s unbounded `Future.wait(_pendingSaves)`, and `_closeDatabase` awaits drift's background isolate. Both signal handlers' exit(0) and `_abort`'s exit(1) now sit behind that single un-timed future, so one wedged adapter yields a daemon that neither serves nor exits while still holding the AD-14 address. Choosing the bound is a policy call: how long is a history write allowed to take before it is abandoned.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Bounded per-step timeout",
+          "effect": "build",
+          "intent": "Give DaemonLifecycle._step a documented policy timeout, log the step that exceeded it with its name, continue the remaining teardown steps, and always reach exit(0)/exit(1). Pin the wedged-step case with a row per exit path."
+        },
+        {
+          "key": "2",
+          "label": "Close -- accept the unbounded wait",
+          "effect": "close",
+          "resolution": "A history write in flight is worth waiting for indefinitely, and a wedged adapter is a bug to fix at its source rather than to time out around."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-21",
+      "question": "Which framework failures should be fatal to a resident daemon, and which should only be logged?",
+      "context": "`_abort`'s doc says it covers 'a window or a widget tree that will not come up', but runApp does not throw for a failing tree -- build and framework errors go to FlutterError.onError and uncaught async errors to PlatformDispatcher.instance.onError, and a grep over lib/ finds neither installed (nor runZonedGuarded). So the guard only ever sees a rejection from `_createHiddenWindow` or `bindHotkey`. Installing a handler that calls exit(1) would let a single failing build kill a resident daemon, which is arguably worse than the gap.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Install handlers that log, never exit",
+          "effect": "build",
+          "intent": "Install FlutterError.onError and PlatformDispatcher.instance.onError to route framework and uncaught async errors to the Logger port (error type only, per the Logger contract) without exiting, and narrow `_abort`'s doc comment to what it actually guards."
+        },
+        {
+          "key": "2",
+          "label": "Install handlers that abort",
+          "effect": "build",
+          "intent": "Treat a framework or uncaught async error as fatal: install both handlers, route them into `_abort` so the ordered teardown runs, and exit(1) -- making the doc comment true as written."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-27",
+      "question": "Should PanelVisibility learn which window took focus, so the panel stops dismissing itself for a dialog it opened?",
+      "context": "window_manager_panel_visibility.dart:220 hides on any blur whose only guards are `!_visible` and `_outstanding > 0`; window_manager reports one blur for every loss of keyboard focus and does not distinguish 'the user clicked another application' from 'a modal, tooltip or portal dialog took focus'. The panel has no focusable child window today -- the settings surface is an in-tree view swap, not a second window -- so the case is currently unreachable. The honest fix needs a signal the port does not carry.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Widen the port",
+          "effect": "build",
+          "intent": "Give the panel window seam a way to report that focus moved to another window of this app (or which window took it), and make `_onBlur` ignore those blurs while still honouring CAP-14 for a genuine loss to another application."
+        },
+        {
+          "key": "2",
+          "label": "Close -- unreachable today",
+          "effect": "close",
+          "resolution": "Nothing under lib/src/ui/ opens a second window; the case becomes real only when a dialog, tooltip window or portal prompt is added, and would be re-filed then."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "3"
+    },
+    {
+      "id": "DW-28",
+      "question": "Should a queued window request be bounded by a timeout, and should the caller be told when a request was abandoned rather than applied?",
+      "context": "`_enqueue` (window_manager_panel_visibility.dart:124-128) chains every request with no depth bound and no timeout, so a window call that never settles parks the whole chain forever and the panel stops responding until restart -- the same unbounded-await shape as DW-20. Separately, `dispose()` (:109-119) flips `_disposed` and never awaits the queue tail, which is the intended behaviour for a daemon that must exit, but means the future a caller holds resolves without the window having moved and nothing distinguishes the two.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Timeout plus a stated contract",
+          "effect": "build",
+          "intent": "Bound each queued window call with the same policy timeout chosen for DW-20, log the request that exceeded it, and state on PanelVisibility.show/hide what a resolved future means for a superseded or disposal-abandoned request (which is DW-35's doc edit, bundled separately)."
+        },
+        {
+          "key": "2",
+          "label": "Close -- the queue is cheap and disposal is right",
+          "effect": "close",
+          "resolution": "A burst of presses costs one microtask each and accumulates nothing, and abandoning an in-flight request at teardown is what stops a mapping focus() running after disposal."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-30",
+      "question": "Should a `restore`-sourced visibility change start a fresh session, replacing whatever the user had typed with the clipboard?",
+      "context": "window_manager_panel_visibility.dart:169-171 reconciles a `restore` to true, `_setMirror` emits it on `changes`, and correction_controller.dart:319-332 begins a fresh session on every true -- bumping the session token, resetting to CorrectionState.empty and re-seeding from the clipboard. So a user who types into the panel, iconifies it from the task bar and restores it loses their text. This follows AD-18 literally and the minimize/restore pair is required (gtk_window_iconify emits no GTK hide), and story 9 confirmed the behaviour deliberately (DW-48); separating 'the panel came back' from 'a new session starts' needs a distinction panel_visibility.dart:12's `Stream<bool> changes` does not carry.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Distinguish restore from a new session",
+          "effect": "build",
+          "intent": "Widen PanelVisibility so a change carries why it happened (or add a second signal), stop a restore-sourced true from re-seeding the editor, teach FakePanelVisibility the restore concept it lacks, and add a row pairing a restore-sourced true with the controller."
+        },
+        {
+          "key": "2",
+          "label": "Close -- AD-18 is literal",
+          "effect": "close",
+          "resolution": "AD-18 says every true starts a fresh session re-seeded from the current clipboard, whatever caused it; the trade was made under that authority and re-confirmed by story 9."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-52",
+      "question": "Should a pointer user be able to select a variant, or is CAP-4's keyboard-only selection the intended affordance?",
+      "context": "suggestion_card.dart:63-116 has no InkWell, GestureDetector or onTap -- the only pointer target is the copy IconButton at :100 -- and the digit shortcuts are scoped to the suggestions region (correction_panel.dart:154-160). CAP-4 says 'pressing 1, 2, or 3 selects the corresponding variant', which is exactly what shipped, so this is a product choice rather than a breach: a mouse user can copy any variant and highlight none. The spine's Deferred section hands panel interaction detail to the widgets.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Make the cards tappable",
+          "effect": "build",
+          "intent": "Add tap-to-select to SuggestionCard alongside the existing digit shortcuts, keeping the selected-register state in CorrectionController, and cover selection by tap for each variant with a row."
+        },
+        {
+          "key": "2",
+          "label": "Close -- keyboard-only is the design",
+          "effect": "close",
+          "resolution": "CAP-4 specifies the digit keys and the panel is a keyboard-first surface summoned by a hotkey; a pointer user can still copy any variant."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-55",
+      "question": "Should overlapping clipboard writes be serialised, or should the port report back what the display server actually holds?",
+      "context": "CAP-14 keeps every variant copyable and the panel neither serialises nor disables copy buttons while a write is in flight. The verdict half is fixed -- correction_controller.dart:100 and :213 bump a `_copyToken` so only the newest copy's outcome is rendered (dropped at :217 and :243) -- but two ClipboardPort.writeText calls are two pieces of display-server IPC and the last one applied need not be the last one issued, so the panel can show the newest copy's verdict over a clipboard holding the other variant. Bounded in practice: the two presses are a human's, and both variants are ones the user asked for.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Serialise writes in the controller",
+          "effect": "build",
+          "intent": "Chain ClipboardPort.writeText calls in CorrectionController so the last press is the last write applied, keeping the copy buttons enabled, and add rows driving two overlapping copies in both completion orders."
+        },
+        {
+          "key": "2",
+          "label": "Have the port report the applied value",
+          "effect": "build",
+          "intent": "Widen ClipboardPort so a write reports what the display server actually holds afterwards, and render the verdict against that rather than against the request."
+        },
+        {
+          "key": "3",
+          "label": "Close -- bounded in practice",
+          "effect": "close",
+          "resolution": "Two presses are hundreds of milliseconds apart, both variants are ones the user chose, and the newest verdict already wins."
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-57",
+      "question": "Which keyboard model should the 1/2/3 variant shortcuts use on a non-QWERTY layout?",
+      "context": "register_key_slot.dart:38 derives the activator as `LogicalKeyboardKey(LogicalKeyboardKey.digit1.keyId + index)` -- a logical key, i.e. the character the layout produces -- so on AZERTY or a Dvorak variant the unshifted top row carries other logical keys and no row is selected; the shifted form carries digit1 but arrives with Shift down, which a bare SingleActivator rejects. The hint at least degrades now (suggestion_card.dart:81-83 colours it disabledColor unless actionable), so the panel no longer promises a keystroke for a non-actionable variant, but it still promises one for an actionable variant a non-QWERTY user cannot produce. Matching by physical position is right for QWERTY and AZERTY and wrong for anyone who remaps deliberately.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Select by physical position",
+          "effect": "build",
+          "intent": "Derive the selecting activator from `PhysicalKeyboardKey.digit1.usbHidUsage + index` so the top-row position selects on any layout, and derive SuggestionCard.keyHint from the same source so the hint cannot promise a key that does nothing."
+        },
+        {
+          "key": "2",
+          "label": "Degrade the hint instead",
+          "effect": "build",
+          "intent": "Keep the logical-key activators and hide the 1/2/3 hint entirely when the layout does not produce those logical keys, on the principle that no hint is honest and a wrong hint is not."
+        },
+        {
+          "key": "3",
+          "label": "Close -- AD-6 defines the key by index",
+          "effect": "close",
+          "resolution": "AD-6 states the selecting key is the register's index plus one, and the shipped derivation is the literal reading of that."
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-62",
+      "question": "Should CorrectionPanel re-bind its controller when the provider rebuilds, or should the watched seams be guaranteed constant?",
+      "context": "correction_panel.dart:185 does a one-time `ref.read(correctionControllerProvider)` in initState and keeps the instance for the panel's life; `_onStateStreamClosed` (:228-235) logs and keeps the last state rather than re-binding. That is safe only because main.dart:400-403 supplies the watched seams as constant value overrides -- a fact about today's graph, not about the type. If DW-16 makes either seam mutable, the provider rebuilds, the read controller is disposed, its `changes` stream closes, and the panel freezes on its final frame with no later summon reaching it. The two entries must be settled together.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Re-bind with ref.listen",
+          "effect": "build",
+          "intent": "Make CorrectionPanel re-read and re-subscribe when correctionControllerProvider rebuilds (ref.listen), preserving nothing across the swap that AD-18 would not, and add a row that rebuilds the provider and drives a summon afterwards. Land this with DW-16 if the active pair becomes live."
+        },
+        {
+          "key": "2",
+          "label": "Keep the seams constant and say so",
+          "effect": "close",
+          "resolution": "The seam is constant, the doc comment now states the condition rather than asserting the value never changes, and a path nothing can trigger is a path no test can pin."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-66",
+      "question": "How should a Wayland user be shown the combination in effect, given the portal returns only a localized description?",
+      "context": "All three HotkeyBound constructions in wayland_portal_global_hotkey.dart (:340-344, :871-878, :969-974) hard-code `effective: null`, and the only reader of the portal's `trigger_description` is `_logTriggerDescription` (:1124-1135), which logs it and parses nothing. hotkey_status_view.dart:168-177 renders 'This backend cannot report the combination in effect, so this app cannot show it' -- true, and all that can currently be said. The consequence is that a Wayland user never sees their own combination in this app, before or after a compositor rebind (DW-80).",
+      "options": [
+        {
+          "key": "1",
+          "label": "Render the localized description",
+          "effect": "build",
+          "intent": "Display the portal's trigger_description on the settings screen as text, clearly labelled as the desktop's own wording rather than this app's, and note in the widget doc that this is the first place vendor prose reaches a user."
+        },
+        {
+          "key": "2",
+          "label": "Parse the trigger back",
+          "effect": "build",
+          "intent": "Parse the portal's shortcut trigger into a HotkeyBinding wherever the portal supplies a machine-readable form, populate `effective` from it, and fall back to the current sentence when it does not."
+        },
+        {
+          "key": "3",
+          "label": "Close -- the portal supplies nothing parseable",
+          "effect": "close",
+          "resolution": "AD-10's `effective: null` vocabulary is exactly what the portal supports, and the screen states the limitation honestly."
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-67",
+      "question": "Should HotkeyBindOutcome gain a third arm so a Wayland honoured bind is distinguishable from an abandoned rebind?",
+      "context": "hotkey_status_view.dart:144-146 compares effective against the stored preference and says they differ, but only inside the `effective != null` branch -- which closes the X11 case. On Wayland the honoured bind (wayland_portal_global_hotkey.dart:340) and the rebind abandoned because Session.Close was refused (:969) both produce the byte-identical `HotkeyBound(HotkeyRegistration(effective: null, authority: compositor))`, so no comparison is possible at all. Adding an arm touches HotkeyBindOutcome, whose shape AD-9 fixes verbatim.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Add a third outcome arm",
+          "effect": "build",
+          "intent": "Add an arm to HotkeyBindOutcome (or a field on HotkeyRegistration) that distinguishes an honoured bind from a rebind the portal abandoned, render the difference on the settings screen, and record the AD-9 widening in the spine as the spine-currency bundle does for the others."
+        },
+        {
+          "key": "2",
+          "label": "Close -- subsumed by DW-66",
+          "effect": "close",
+          "resolution": "With a readable trigger from the portal (DW-66) the comparison becomes possible without a new arm, and until then no new arm gives the user information the app can actually obtain."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "2"
+    },
+    {
+      "id": "DW-68",
+      "question": "Should changeHotkey write the preference first and bind on success, or unbind after a failed write?",
+      "context": "settings_controller.dart:147-150 awaits `_bind(binding)` and then calls `_writeChange` unconditionally -- the bind's answer decides what is rendered, never what is stored -- and the doc at :138-141 states that outright. A refused write therefore leaves the shortcut already changed while the surface says nothing was saved. Story 10 made it visible rather than silent (the screen shows the effective combination, the stored preference, the difference, and the write failure -- four true statements), and its Never list explicitly ruled out re-architecting the ordering. DW-84 is the same ordering seen from the other direction.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Write first, bind on success",
+          "effect": "build",
+          "intent": "Reorder SettingsController.changeHotkey to persist the preference first and bind only on a successful write, rolling the write back if the bind then fails, so the stored preference and the grabbed combination cannot diverge. This also closes DW-84's permanently-refused-key case."
+        },
+        {
+          "key": "2",
+          "label": "Unbind after a failed write",
+          "effect": "build",
+          "intent": "Keep bind-first but release the new grab and restore the previous combination when the write fails, so a refused write leaves the process exactly as it found it."
+        },
+        {
+          "key": "3",
+          "label": "Close -- the screen tells the truth",
+          "effect": "close",
+          "resolution": "The surface renders the effective combination, the stored preference, their difference and the write failure together, which describes exactly what happened."
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-71",
+      "question": "How should the settings key field tell a user which keys this build can actually register?",
+      "context": "hotkey_preference_field.dart:184-207 takes the key as free text gated only on non-empty trimmed input, deliberately: HotkeyKeyCatalogue lives two rings out and AD-1 puts it beyond the ui ring's reach (`grep -rn infrastructure lib/src/ui/` returns nothing). The consequence is that a typo and a genuinely unbindable key produce the same class of answer one attempt later, and the seven labels at hotkey_key_catalogue.dart:134-142 are refused on X11 while accepted as a preference on Wayland -- so the same config means different things on the two display servers and the screen cannot warn about it.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Expose the catalogue through a port",
+          "effect": "build",
+          "intent": "Give the ui ring a sanctioned way to read which labels this build can register -- a port or a list supplied by SettingsController -- validate the key field against it before Apply, and state the per-display-server difference where it applies."
+        },
+        {
+          "key": "2",
+          "label": "Refuse the seven everywhere",
+          "effect": "build",
+          "intent": "Make the hotkey adapters refuse Space, Tab, Enter and F1-F4 on Wayland as well as X11 so one config means one thing on both display servers, and say so in the field's help text."
+        },
+        {
+          "key": "3",
+          "label": "Close -- the screen reports honestly",
+          "effect": "close",
+          "resolution": "The adapter's answer is rendered faithfully one attempt later, and curating the field is a product decision the story's intent did not carry."
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-78",
+      "question": "Should an unapplied hotkey draft survive a view swap, or is discarding it correct?",
+      "context": "The draft lives only in _HotkeyPreferenceFieldState (hotkey_preference_field.dart:87-94), and DaemonHome unmounts SettingsScreen on Back, on a fresh session and on a show request (daemon_home.dart:94, :123-128, :163-186) -- so typing F12 and then summoning the panel, or losing focus (which CAP-14 hides on), discards it. The behaviour is deliberate, matches AD-18's every-show-starts-fresh rule, and is now stated in DaemonHome's class doc. Keeping the draft means giving it an owner that outlives the swap, and it interacts with the field's re-seed-from-config rule. The entry notes nobody has asked for it.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Keep the draft",
+          "effect": "build",
+          "intent": "Give the unapplied hotkey draft an owner that outlives a view swap -- SettingsState or a widget above DaemonHome -- and re-seed it from config only when the config actually changes, with rows covering summon-and-return and Back-and-reopen."
+        },
+        {
+          "key": "2",
+          "label": "Close -- a draft is not a setting",
+          "effect": "close",
+          "resolution": "A combination the config file does not hold is not a setting; the discard matches AD-18's rule for the panel and is stated in DaemonHome's doc."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "2"
+    },
+    {
+      "id": "DW-81",
+      "question": "Should a hotkey press while the settings view is showing bring back the panel, or stay a pure window toggle?",
+      "context": "panel_controller.dart:73-79 branches purely on whether the window is visible and takes the AD-8 hide arm, with no notion of which view is showing; DaemonHome subscribes only to showRequests (daemon_home.dart:90-99), so nothing intercepts a press made while settings is up. The window vanishes, `_showingSettings` stays true, and the next press raises the panel -- two presses and a disappearing window to get from settings to the panel, via the most likely way out of a surface summoned by a hotkey. Nothing lost (the draft discard is DW-78's), and both reviewers rated the intent genuinely ambiguous. No row covers the case in either direction.",
+      "options": [
+        {
+          "key": "1",
+          "label": "The toggle asks the home view first",
+          "effect": "build",
+          "intent": "Make a hotkey press while a non-panel view is showing return to the panel instead of hiding the window, keeping the hide arm for a press while the panel itself is showing, and cover both directions with rows."
+        },
+        {
+          "key": "2",
+          "label": "Close -- keep a pure window toggle",
+          "effect": "close",
+          "resolution": "CAP-14 defines the hotkey as a window toggle; the two-press path is the accepted cost of one unambiguous rule."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-84",
+      "question": "Should a binding whose refusal is permanent for this build be kept out of the config file?",
+      "context": "settings_controller.dart:147-150 writes the requested binding unconditionally after the bind. On Wayland that is right -- the preference must survive to a launch where the portal may answer differently. On X11 the two refusals that never reach the backend (a label outside HotkeyKeyCatalogue, and the seven at hotkey_key_catalogue.dart:134-142) are settled facts that will answer identically forever, and `_refusedBeforeBackend` correctly keeps the previous grab working -- so the user reads a working hotkey and a stored preference, quits, and returns to a daemon with no hotkey at all. Nothing in the suite drives a refused-before-backend bind followed by a restart.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Do not persist a permanent refusal",
+          "effect": "build",
+          "intent": "Let the port report a refusal as permanent (a field on HotkeyUnavailable, recorded against AD-9 as the spine-currency bundle does for other widenings) and have changeHotkey skip the config write for one, with a row driving a refused-before-backend bind followed by a fresh startup."
+        },
+        {
+          "key": "2",
+          "label": "Close -- subsumed by DW-68",
+          "effect": "close",
+          "resolution": "Writing only on a successful bind (DW-68 option 1) closes this case as a consequence, so it should be settled there rather than twice."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "2"
+    },
+    {
+      "id": "DW-85",
+      "question": "How should a mutation that fails after the settings screen closes be reported to the user?",
+      "context": "SettingsController outlives the surface and resolves correctly -- `_setState` (settings_controller.dart:613-626) sets SettingsState.failure and releases the slot, and no exception escapes -- but settings_screen.dart:65-74 is the only subscriber in lib/ and it cancels on dispose. Story 10 built two ways to leave mid-mutation (the Back affordance, and a summon returning to the panel), and the Wayland mutation window is seconds wide by design because AD-11 puts a portal dialog inside it. A user who presses Apply, is summoned away by their own hotkey, and whose write then fails is told nothing and believes the change landed; the failure survives only until someone reopens settings, with no indication of which change it belonged to or how old it is.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Defer the announcement",
+          "effect": "build",
+          "intent": "Give SettingsState a notion of an unacknowledged failure carrying what changed and when, announce it the next time the settings surface mounts, and clear it on acknowledgement."
+        },
+        {
+          "key": "2",
+          "label": "State accepted-not-confirmed",
+          "effect": "build",
+          "intent": "State on the settings screen, before the user can leave, that a mutation in flight continues after the surface closes and that its outcome is visible only on reopening -- making the contract honest without new state."
+        },
+        {
+          "key": "3",
+          "label": "Close -- the failure survives in state",
+          "effect": "close",
+          "resolution": "SettingsState.failure persists and is rendered on reopen, and a tray report is ruled out by story 10's Never list plus the tray/settings divergence DW-79 already holds."
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-87",
+      "question": "How should the desktop-entry claims that need a real GNOME or KDE session be discharged?",
+      "context": "Story 11 shipped the app-id entry AD-11 makes a precondition of the Wayland bind, aligned the three spellings of the app id and pinned their agreement by test, and desktop_entries_test.dart runs the installer into a temporary XDG tree -- a check of bytes and paths. Four runtime facts are entirely owed and none can be observed here: that the desktop associates the registered app id with the installed file, that the bind survives because of it, that the autostart entry starts the daemon at login, and that an autostarted daemon plus a manual launch resolve to one instance through AD-14's lock. Xvfb is now available on this machine but supplies no compositor, no xdg-desktop-portal and no session bus, so it cannot reach any of the four.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Add a runnable manual checklist",
+          "effect": "build",
+          "intent": "Turn the owed observation into a checkable procedure committed next to test/platform/desktop_entries_live_test.dart -- install the entries, press the hotkey, log out and back in, launch a second copy by hand -- with an expected result per step, so the work a human must do is a script rather than prose."
+        },
+        {
+          "key": "2",
+          "label": "Keep open until someone has a desktop",
+          "effect": "keep-open"
+        },
+        {
+          "key": "3",
+          "label": "Close -- the static half is enough",
+          "effect": "close",
+          "resolution": "The strings and paths are pinned by test, and the runtime half rides with the packaging-format decision (DW-89) rather than standing alone."
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-88",
+      "question": "What should happen to a CI workflow that has never been executed?",
+      "context": ".github/workflows/ci.yml defines one analyze-and-test job (flutter-action 3.44.8, `flutter pub get`, `dart analyze --fatal-infos`, `tool/provision_sidecar.sh`, then the scoped `dart test --exclude-tags=live`), and its own header says 'STATUS: NEVER EXECUTED'. gh is installed but unauthenticated here, so there is no run evidence either way. The first push that triggers it is the verification, a first-run fix should be expected, and DW-46's cross-suite flakes mean a red run may be a false red -- which is what makes an unwatched gate a liability. Triggering it is an outward-facing action, not something an unattended dev session should do.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Retire the flakes, then push",
+          "effect": "keep-open"
+        },
+        {
+          "key": "2",
+          "label": "Make it runnable before the first push",
+          "effect": "build",
+          "intent": "Add a workflow_dispatch trigger and a documented local dry-run that reproduces the runner's steps in order (or drives them through act), so the workflow's steps -- especially tool/provision_sidecar.sh, the only one that installs anything -- are exercised before the first real push."
+        },
+        {
+          "key": "3",
+          "label": "Close -- the first push verifies it",
+          "effect": "close",
+          "resolution": "The file is authored and reviewed; nothing further about a GitHub runner can be established from this container."
+        }
+      ],
+      "recommendation": "1"
+    },
+    {
+      "id": "DW-89",
+      "question": "Which distribution format should the app ship in, and how is AD-11's Registry.Register constraint preserved until that is decided?",
+      "context": "Story 11 shipped desktop entries and an installer and deliberately chose no format; the spine's Deferred section still lists deb, Flatpak and AppImage as open, and linux/packaging/ holds only the two .desktop files. The fact that must not be lost with the decision: a sandboxed Flatpak build must not call Registry.Register, because AD-11 step 1 registers the app id precisely because an unsandboxed app has no other way to tell the portal who it is, while a Flatpak sandbox supplies it. So the adapter's first portal call is conditional on the packaging choice, making Flatpak an edit to the AD-11 sequence rather than a build-system change. Separately, tool/install_desktop_entries.sh writes into the user's XDG directories, which is not how any of the three formats ship entries.",
+      "options": [
+        {
+          "key": "1",
+          "label": "Record the constraint in code now",
+          "effect": "build",
+          "intent": "Put the Flatpak constraint where it cannot be lost: an explicit note at wayland_portal_global_hotkey.dart's Registry.Register call and a short linux/packaging/README stating that a sandboxed build must not register, and that install_desktop_entries.sh is a developer install rather than a packaging step."
+        },
+        {
+          "key": "2",
+          "label": "Pick a format and revisit AD-11",
+          "effect": "build",
+          "intent": "Choose the distribution format, then revisit AD-11 with the spine -- including whether Registry.Register is called at all -- and replace install_desktop_entries.sh with the format's own entry installation."
+        },
+        {
+          "key": "3",
+          "label": "Keep open",
+          "effect": "keep-open"
+        }
+      ],
+      "recommendation": "1"
+    }
+  ],
+  "escalations": []
+}

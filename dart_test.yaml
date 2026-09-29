@@ -1,0 +1,27 @@
+# Test tags. Declaring the tag keeps `dart test` from warning about it, and
+# the skip reason is what makes a bare `dart test` safe: without it the live
+# smoke spawns a nested `claude` CLI on the obvious command, and that nested
+# process has been observed terminating the surrounding dev session.
+tags:
+  live:
+    skip: >-
+      spawns the real Python sidecar, claude_agent_sdk and the `claude` CLI —
+      opt in deliberately with `dart test --tags=live --run-skipped`
+
+# Suites run one at a time, and this is a correctness requirement rather than
+# a preference.
+#
+# `dart test` and `flutter test` both run test suites as isolates inside a
+# single process, and the Dart VM allows exactly one abstract-namespace unix
+# socket to be bound per *process*: a second `ServerSocket.bind` fails with
+# "The shared flag to bind() needs to be `true` if binding multiple times on
+# the same path" even when the paths differ, and a following `Socket.connect`
+# is then answered by the socket that is already bound. Two suites that bind
+# one concurrently therefore see a bogus `alreadyRunning`.
+#
+# `single_instance_lock_test.dart` and `daemon_startup_test.dart` both bind
+# one — AD-14's singleton is the thing they exist to test — so they cannot
+# overlap. Serialising every suite is the only setting both runners honour;
+# per-tag concurrency does not exist. Recorded in the deferred-work ledger as
+# DW-15.
+concurrency: 1

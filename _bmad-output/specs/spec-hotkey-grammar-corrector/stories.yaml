@@ -1,0 +1,581 @@
+- id: "1"
+  title: Config store, app paths, and system ports
+  description: >-
+    Build the config and system foundations the daemon needs before anything
+    can be wired: AppPaths, JsonConfigStore, SystemClock, StderrLogger, and
+    SingleInstanceLock. Serves CAP-8 and CAP-12's config half and AD-13's
+    single-owner rule; no UI and no composition root in this story.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-13 (config has exactly one owner; every
+    settings mutation goes through ConfigStore; nothing else opens the config
+    file; a malformed file yields defaults plus a surfaced warning, never a
+    failed startup), AD-14 (the daemon is a singleton — acquire an
+    abstract-namespace socket or lock file under $XDG_RUNTIME_DIR at startup;
+    if held, signal the running instance to show its panel and exit 0), AD-1
+    (dependency direction — these are infrastructure adapters behind the
+    domain ports that already exist in lib/src/domain/config/config_store.dart,
+    lib/src/domain/clock.dart and lib/src/domain/logger.dart; do not add
+    imports to domain), AD-19 (interpreter path and sidecar path are config
+    values, not compiled-in constants), and the spine's Consistency
+    Conventions rows for "Config & data paths" (config at
+    ${XDG_CONFIG_HOME:-~/.config}/hotkey-grammar-corrector/config.json, data at
+    ${XDG_DATA_HOME:-~/.local/share}/hotkey-grammar-corrector/history.sqlite,
+    resolved in one AppPaths type), "Time" (unix millis UTC from the Clock
+    port; never DateTime.now() outside the clock adapter), "Logging"
+    (structured lines to stderr through the one Logger port; NEVER log
+    input_text or suggestion bodies), and "Enums in storage/config" (persist
+    and serialize by .name, never by index).
+
+    Note on AD ids: the breakdown request cited AD-14 for JsonConfigStore and
+    AD-9 for SingleInstanceLock. Both are wrong against the spine. AD-13 is
+    config ownership, AD-14 is the daemon singleton, AD-9 is the GlobalHotkey
+    port. Use the spine's ids as written above.
+
+    Deferred-work items this story closes (from
+    _bmad-output/implementation-artifacts/deferred-work.md — retain each heading;
+    when resolved, set `status: done <date>` and add a `resolution:` citing evidence):
+
+    1. source_spec spec-register-tagged-stream-parser.md — "Truncation inside
+    the final SHORTER line is indistinguishable from a clean no-trailing-newline
+    end, so a cut-off response completes as success with partial text." The
+    ledger states this is fixable only at the wire-format/prompt level or in the
+    adapter contract, not in the parser. This story authors the shipped default
+    preset's systemPrompt as a config default, so fix it there: require a
+    trailing newline or an explicit end sentinel after the SHORTER line in the
+    shipped prompt, and make RegisterTaggedStreamParser's contract documentation
+    state which end-of-stream shapes are now trusted. Do not weaken the parser's
+    existing tolerance without a test proving the new prompt guarantees it.
+
+    2. source_spec spec-claude-agent-sdk-provider.md — "No wall-clock timeout on
+    a correction — a sidecar whose network call stalls (no output, no EOF, no
+    exit) hangs the stream until the user cancels, and
+    CorrectionFailureKind.timeout remains unproduced; enforce it in the adapter
+    when the config-store story supplies the timeout value." This IS the
+    config-store story. Add the timeout as a config value with a default, and
+    enforce it inside ClaudeAgentSdkCorrectionProvider so a stalled sidecar
+    yields CorrectionFailed(timeout, ...) and the process GROUP is killed per
+    AD-19 (SIGTERM then SIGKILL after a grace period — signalling only the
+    Python PID orphans the claude CLI grandchild). Test the timeout path with a
+    fake that never emits, not against a real sidecar.
+
+    Everything here is headless-verifiable: unit tests over a temp directory and
+    fake environment, no Flutter binding required. Update test/fakes/ where a
+    port's contract changes.
+- id: "2"
+  title: Drift history persistence
+  description: >-
+    Implement AppDatabase over AD-7's schema verbatim and
+    DriftCorrectionRepository behind the existing CorrectionRepository port, so
+    CAP-7's history survives a restart. One transactional write per correction,
+    at the terminal event only.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-7 (use the CREATE TABLE statements in the spine
+    VERBATIM — corrections and suggestions with exactly those columns, types,
+    the ON DELETE CASCADE, the composite primary key, and the
+    corrections_created_at_idx index; the repository maps CorrectionCompleted
+    onto them with NO intermediate model; provider_id, model and preset_id are
+    load-bearing because CAP-8 lets the backend change under the user; one
+    write, at the terminal event, inside a transaction; CorrectionController is
+    the SOLE caller of CorrectionRepository.save — provider adapters never
+    persist), AD-6 (persist SuggestionRegister by its .name string, never its
+    index — a future enum reorder must not silently rewrite stored history),
+    AD-1 (drift lives in infrastructure only; the domain ring must not acquire a
+    drift import, and test/architecture/ad1_import_rule_test.dart must still
+    pass), and the Consistency Conventions rows for "Time" (created_at is unix
+    millis UTC from the Clock port) and "Ids" (database integer keys never leave
+    the repository).
+
+    Deferred-work item this story closes (from
+    _bmad-output/implementation-artifacts/deferred-work.md — retain its heading;
+    when resolved, set `status: done <date>` and add a `resolution:` citing evidence): source_spec spec-bootstrap-domain-ring.md — "drift_flutter 0.3.1
+    locks end-of-life native sqlite packages (sqlite3_flutter_libs 0.6.0+eol,
+    sqlcipher_flutter_libs 0.7.0+eol) — revisit the drift/drift_flutter pins
+    when the persistence slice lands." Resolve it: check whether a
+    non-EOL-resolving combination exists that is satisfiable against Flutter
+    3.44.8 / Dart 3.12.2 and flutter_riverpod 3.4.2 (the spine's Pin
+    renegotiation paragraph records why drift_dev and build_runner are pinned at
+    2.34.0 / 2.15.1 and what is unsatisfiable above them). If a clean
+    combination exists, take it and record the resolved versions. If it does
+    not, say so explicitly with the resolution output that proves it, keep the
+    current pins, and add that evidence to the same open entry.
+
+    Tests run headless with drift's in-memory / temp-file executor — no Flutter
+    binding, no real desktop. Cite CAP-7 in the test names per the spine's
+    Tests convention. Prove restart durability by reopening a temp-file
+    database, not by asserting on an in-memory handle.
+- id: "3"
+  title: Controller failure contract
+  description: >-
+    Close the unmodelled port-failure contract the three application
+    controllers currently leak as unhandled async errors, now that real file and
+    database IO can throw. Also settles two contract decisions the controller
+    spec left open: the register-set check on CorrectionCompleted and the
+    empty-submit guard.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-3 (exactly one terminal event; a provider never
+    throws across the boundary; CorrectionCompleted.suggestions always has one
+    entry per SuggestionRegister value), AD-12 (a failed hotkey registration
+    resolves to a HotkeyUnavailable state, never an exception — this is the
+    state the ledger notes AD-12 names but the domain does not yet declare),
+    AD-13 (a malformed or unwritable config never fails startup for a resident
+    daemon — it surfaces a warning), AD-15 (each adapter owns its failure
+    translation; a vendor error type never escapes a port boundary), and the
+    Consistency Conventions "Errors" row (expected failures are modelled values;
+    exceptions signal programmer error only). This story adds domain types, so
+    keep AD-1 green.
+
+    Deferred-work items this story closes (from
+    _bmad-output/implementation-artifacts/deferred-work.md — retain each heading;
+    when resolved, set `status: done <date>` and add a `resolution:` citing evidence):
+
+    1. source_spec spec-application-layer-controllers.md — "Port failures are
+    unmodelled across all three controllers — a rejected
+    CorrectionRepository.save, a throwing ClipboardPort.readText, a rejected
+    ConfigStore.write, and a throwing GlobalHotkey.bind each become an unhandled
+    async error or an unrendered exception in a daemon that must stay resident."
+    The ledger names the shape of the fix: inject the Logger port into the
+    controllers, add a failure field to SettingsState, and declare the
+    HotkeyUnavailable state AD-12 names. Cover all four named paths plus any
+    other await on a port inside the controllers. A resident daemon must survive
+    every one of them. The controller spec's I/O matrix says "N/A" under Error
+    Handling for 11 of 13 rows — fill in all of them, and state in the story's
+    completion notes what each row now does.
+
+    2. source_spec spec-application-layer-controllers.md — "A
+    CorrectionCompleted carrying missing or duplicated registers is accepted and
+    written to history as a successful correction that produced nothing." AD-3
+    guarantees one Suggestion per SuggestionRegister value and the controller
+    already defends the other AD-3 breach (a second terminal event). Defend this
+    one the same way. The open contract decision is which
+    CorrectionFailureKind a register mismatch maps to — AD-15 puts failure
+    translation in the adapter, so decide deliberately between translating in
+    the adapter and treating a controller-side mismatch as malformedResponse,
+    write the decision into the code as a documented contract, and say which you
+    chose and why in the completion notes.
+
+    3. source_spec spec-application-layer-controllers.md — "Nothing stops
+    submitting an empty editor — it spawns a sidecar process and writes a CAP-7
+    history row with empty input_text." The ledger notes the guard could live in
+    the controller or in a disabled Correct action in the panel UI. Put it in
+    the CONTROLLER so it holds for every caller, and note in the completion
+    notes that the panel UI story should additionally disable the action — a UI
+    affordance on top of the invariant, not instead of it.
+
+    All of this is headless-verifiable with the existing test/fakes/ — extend
+    the fakes so each can be told to throw or reject on demand. No real desktop
+    needed.
+- id: "4"
+  title: Composition root and Riverpod wiring
+  description: >-
+    Stand up main.dart and application/composition/ so the domain, controllers
+    and adapters built so far actually run as one daemon: ProviderScope, the
+    Riverpod provider graph, display-server adapter selection, and a window that
+    starts hidden.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-5 (main.dart reads AppConfig and resolves the
+    single active (CorrectionProvider, Preset) pair and injects it; nothing
+    below the composition root selects a provider or accepts a model id without
+    its prompt), AD-17 (Riverpod lives in application and ui only; the providers
+    in application/composition/ ARE the composition root, and main.dart only
+    installs the ProviderScope and the overrides for the selected platform
+    adapters; domain types take their ports through constructors and never
+    import Riverpod), AD-8 (the window is constructed once at startup and
+    hidden; nothing on the show path allocates, loads, or awaits IO), AD-15
+    (provider selection is a Map<String, CorrectionProvider
+    Function(ProviderConfig)> lookup, never a switch in the pipeline — the
+    registry already exists at
+    lib/src/infrastructure/correction/provider_registry.dart), AD-9 (the
+    composition root reads XDG_SESSION_TYPE, falling back to the presence of
+    WAYLAND_DISPLAY, constructs exactly ONE hotkey adapter, and never switches
+    at runtime — stub the two adapters behind the port for now; stories 7 and 8
+    implement them), AD-19 (interpreter and sidecar paths come from config),
+    AD-14 (the singleton lock from story 1 is acquired here, at startup).
+
+    Deferred-work items this story closes (from
+    _bmad-output/implementation-artifacts/deferred-work.md — retain each heading;
+    when resolved, set `status: done <date>` and add a `resolution:` citing evidence):
+
+    1. source_spec spec-bootstrap-domain-ring.md — "The generated linux/ runner
+    shows a 1280x720 window on launch — the composition-root slice must replace
+    this with the pre-created hidden window the SPEC mandates (panel is shown
+    only by the hotkey toggle, AD-8)." Edit linux/runner/my_application.cc so
+    the window is not shown on first frame, and pair it with window_manager
+    setup so the panel is constructed and hidden at startup. Launching the
+    daemon must leave NO visible window.
+
+    2. source_spec spec-bootstrap-domain-ring.md — "Domain value types
+    (AppConfig, ProviderConfig, CorrectionRecord, HotkeyBinding) compare by
+    identity — add value equality when a consumer needs it (HotkeyBinding is
+    AD-2/AD-9 verbatim, so its equality needs a spine renegotiation)." Riverpod
+    select and Stream.distinct are the consumers, and they arrive here. Add
+    value equality to AppConfig, ProviderConfig and CorrectionRecord. For
+    HotkeyBinding: the spine fixes its declaration verbatim, and adding
+    operator== / hashCode is an addition rather than a change to the declared
+    fields — do it, and record in the completion notes that AD-9's code block
+    now has members the spine does not show, so the spine needs a currency
+    update. Note HotkeyBinding holds a Set<HotkeyModifier>, so equality must be
+    set equality, not identity on the set.
+
+    3. source_spec spec-application-layer-controllers.md — "CorrectionState and
+    SettingsState compare by identity, so no consumer can dedupe the state
+    emitted per keystroke and per streamed delta." Add value equality to both.
+    The same entry also says: revisit AppConfig's identical() echo suppression
+    in SettingsController, because ConfigStore.changes promises no instance
+    identity — with AppConfig value equality now in place, switch that check to
+    == and test that a re-read config carrying identical values does not
+    re-trigger the echo path.
+
+    4. source_spec spec-claude-agent-sdk-provider.md — "AppConfig.sidecarPath /
+    interpreterPath and the registry's ProviderConfig.settings keys are two
+    unbridged homes for the same AD-19 paths — the composition-root slice must
+    wire one to the other (and pin it with a test) or delete one." Decide and
+    execute: either map AppConfig's first-class fields into the settings map the
+    registry reads, or delete the duplicate home. Pin the outcome with a test
+    that fails if the two drift apart again. State which way you went and why.
+
+    Verification here is a headless widget/unit test over the provider graph
+    plus `flutter run` sanity. This container has no real desktop, so a test
+    that would need one must be skipped with an explicit reason — never faked
+    into passing.
+- id: "5"
+  title: Clipboard and panel visibility adapters
+  description: >-
+    Implement SystemClipboard and WindowManagerPanelVisibility behind their
+    existing domain ports, so CAP-2's pre-fill, CAP-11's copy, and CAP-14's
+    toggle and focus-loss hide have real backing.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-8 (panel visibility is SYNCHRONOUS in-process
+    state and the hotkey toggle reads it without awaiting; the port exposes
+    isVisible as a synchronous field kept current by the adapter from window
+    events including the focus-loss hide; show() only changes visibility on an
+    already-constructed window and nothing on the show path allocates, loads, or
+    awaits IO — CAP-1's 100 ms budget depends on this), AD-18 (every show()
+    starts a fresh panel session, re-seeded from the CURRENT clipboard), AD-1
+    (window_manager and any clipboard plugin stay in infrastructure; the domain
+    ports at lib/src/domain/panel/panel_visibility.dart and
+    lib/src/domain/clipboard/clipboard_port.dart are unchanged except as the
+    ledger item below requires).
+
+    Deferred-work items this story closes (from
+    _bmad-output/implementation-artifacts/deferred-work.md — retain each heading;
+    when resolved, set `status: done <date>` and add a `resolution:` citing evidence):
+
+    1. source_spec spec-application-layer-controllers.md — "The window_manager
+    PanelVisibility adapter must flip its isVisible mirror synchronously inside
+    show()/hide(), not only from window events, or a fast double hotkey press
+    shows twice and never hides." This is the single most important line in this
+    story. Set the mirror inside show() and hide() BEFORE awaiting anything, and
+    reconcile it from window events afterwards. The ledger also requires the
+    test to model the lag: FakePanelVisibility flips synchronously, so a
+    lag-modelling fake or adapter test is the only thing that can catch this —
+    write a test that drives two toggle presses faster than a simulated window
+    event round trip and asserts the panel ends hidden.
+
+    2. source_spec spec-application-layer-controllers.md — "PanelVisibility.
+    changes does not declare whether it is broadcast, but the panel widget and
+    the correction controller will both need it — a single-subscription adapter
+    would throw at startup." ConfigStore.changes already documents itself as
+    broadcast; do the same for PanelVisibility.changes — a doc edit on the
+    domain port plus a broadcast implementation in the adapter plus a test that
+    attaches two listeners. This is a domain edit that the controller spec
+    gated on a human; the human approved it as part of this story's breakdown,
+    so proceed.
+
+    This container has no keybinder-3.0, no xdg-desktop-portal and no compositor
+    — write the code, mark tests that need a real desktop as skipped with an
+    explicit reason, and never fake a passing test.
+- id: "6"
+  title: Tray adapter
+  description: >-
+    Implement TrayManagerTray behind the existing TrayPort: a resident tray icon
+    with a menu that shows the panel, plus the visible statement of hotkey
+    unavailability AD-12 requires.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-12 (a compositor with no GlobalShortcuts portal
+    backend degrades VISIBLY — the tray icon and settings screen state that
+    global hotkeys are unavailable on this compositor, and the tray menu can
+    still open the panel so the app remains usable; this is the fallback path
+    for wlroots compositors such as Sway, Hyprland and Niri), AD-8 (the tray's
+    open-panel action goes through PanelVisibility.show(), the same synchronous
+    path as the hotkey — the tray must not construct a window), AD-1
+    (tray_manager stays in infrastructure, behind
+    lib/src/domain/tray/tray_port.dart), AD-14 (the singleton lock signals the
+    running instance to show its panel — a second launch surfaces through the
+    resident tray daemon, it does not start a second icon).
+
+    This story closes no deferred-work item.
+
+    The tray's hotkey-unavailable state consumes the HotkeyUnavailable state
+    added in story 3 — read it from there, do not re-declare it.
+
+    This container has no keybinder-3.0, no xdg-desktop-portal and no compositor
+    — write the code, mark tests that need a real desktop as skipped with an
+    explicit reason, and never fake a passing test. There is also no system tray
+    here; the port-level logic (menu wiring, state mapping) is still testable
+    against a fake and must be tested.
+- id: "7"
+  title: X11 global hotkey adapter
+  description: >-
+    Implement X11GlobalHotkey over hotkey_manager / keybinder-3.0 behind the
+    GlobalHotkey port, delivering CAP-1's summon and CAP-12's X11 half — rebind
+    from settings takes effect without restarting the daemon.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-9 (the GlobalHotkey port in
+    lib/src/domain/hotkey/global_hotkey.dart is the ONLY hotkey surface anything
+    above infrastructure sees; the composition root constructs exactly one
+    adapter and never switches at runtime; HotkeyBinding is the domain type and
+    this adapter serializes it to keybinder's own syntax — `<Ctrl><Shift>g` —
+    which must never appear above infrastructure), AD-10 (bind() returns a
+    HotkeyRegistration stating what is actually in effect and who owns it; on
+    X11 that is BindingAuthority.application and effective equals the requested
+    binding once the grab succeeds; a failed grab must not report success),
+    AD-12 (a failure to bind resolves to the HotkeyUnavailable state from story
+    3, never an exception — a keybinder-3.0 library missing at runtime must not
+    stop the daemon starting), AD-1 (hotkey_manager stays inside
+    lib/src/infrastructure/hotkey/x11_global_hotkey.dart).
+
+    This story closes no deferred-work item.
+
+    The spine's Stack note is load-bearing here: hotkey_manager was last
+    published 2024-05-18 and implements Linux through keybinder-3.0, an X11-only
+    library. It is bound for the X11 adapter ONLY. If it turns out unusable on
+    the pinned Flutter 3.44.8 / Dart 3.12.2, AD-9 makes replacing it a one-file
+    change — say so and propose the replacement rather than leaking X11
+    semantics upward.
+
+    This container has no keybinder-3.0, no xdg-desktop-portal and no compositor
+    — write the code, mark tests that need a real desktop as skipped with an
+    explicit reason, and never fake a passing test. The HotkeyBinding-to-
+    keybinder-string serialization is pure Dart and MUST be unit-tested here
+    with no skip.
+- id: "8"
+  title: Wayland portal global hotkey adapter
+  description: >-
+    Implement WaylandPortalGlobalHotkey over dbus and the XDG GlobalShortcuts
+    portal, in AD-11's exact call order, with AD-12's visible degradation on
+    compositors that ship no portal backend.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-11 (the portal call ORDER is itself an
+    invariant — perform exactly this sequence on the session bus, in this order:
+    (1) org.freedesktop.host.portal.Registry.Register(
+    "com.divertedriver.HotkeyGrammarCorrector") on
+    /org/freedesktop/host/portal/registry, ONCE, before any other portal call,
+    tolerating UnknownMethod / ServiceUnknown because portal < 1.20 has no
+    Registry; (2) org.freedesktop.portal.GlobalShortcuts.CreateSession on
+    /org/freedesktop/portal/desktop passing handle_token and
+    session_handle_token, awaiting the Response signal on the returned Request
+    path; (3) BindShortcuts(session, [("toggle-panel", {description,
+    preferred_trigger})], parent_window: "", options), awaiting Response and
+    reading the bound shortcuts BACK; (4) subscribe to Activated —
+    (o session_handle, s shortcut_id, t timestamp, a{sv} options) — filtering on
+    session handle and shortcut_id == "toggle-panel", and subscribe to
+    ShortcutsChanged), AD-10 (bind() returns the EFFECTIVE binding read back
+    from the portal with BindingAuthority.compositor; preferred_trigger is a
+    hint only — the compositor and user choose the combination and the portal
+    shows its own dialog; effective is null when the backend cannot report it),
+    AD-12 (a failed CreateSession or BindShortcuts resolves to
+    HotkeyUnavailable, NEVER an exception; wlroots compositors — Sway, Hyprland,
+    Niri — ship no GlobalShortcuts backend, only GNOME and KDE do, verified
+    2026-08-06 against community tracking rather than an upstream matrix), AD-9
+    (same single port; this adapter serializes HotkeyBinding to the XDG trigger
+    syntax — `CTRL+SHIFT+g` — and that syntax never appears above
+    infrastructure), AD-1 (dbus stays inside
+    lib/src/infrastructure/hotkey/wayland_portal_global_hotkey.dart).
+
+    This story closes no deferred-work item.
+
+    Two things that will silently break this if missed: the app id must be
+    reverse-DNS AND have an installed .desktop file of the same basename —
+    GNOME discards the bind otherwise. Story 11 ships that file; until it does,
+    this adapter's live path cannot work on a real GNOME session, which is
+    expected, not a bug in this story. Second, the spine's Deferred section
+    notes a sandboxed (Flatpak) app must NOT call Registry.Register — packaging
+    format is undecided, so implement the non-sandboxed path and leave a clearly
+    marked seam.
+
+    This container has no keybinder-3.0, no xdg-desktop-portal and no compositor
+    — write the code, mark tests that need a real desktop as skipped with an
+    explicit reason, and never fake a passing test. The call ORDER is testable
+    without a portal: drive the adapter against a fake D-Bus client and assert
+    the exact sequence, the Registry tolerance of UnknownMethod /
+    ServiceUnknown, the read-back of effective bindings, and the
+    HotkeyUnavailable degradation. Those tests must not be skipped.
+- id: "9"
+  title: Correction panel UI
+  description: >-
+    Build the panel widgets: the original text alongside three labeled register
+    variants, streaming partials, 1/2/3 selection, per-suggestion copy buttons,
+    and the inline error with Retry. Delivers CAP-2, CAP-3, CAP-4, CAP-5,
+    CAP-10, CAP-11, CAP-13 and CAP-14's UI half over the existing
+    CorrectionController.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-6 (SuggestionRegister.values.indexOf(r) + 1 is
+    BOTH the selecting key 1/2/3 and the panel's top-to-bottom order — formal,
+    casual, shorter; do not hardcode either), AD-18 (every show() starts a fresh
+    panel session re-seeded from the current clipboard with previous
+    suggestions, error and edits cleared; Retry replays the string CAPTURED at
+    submit, not whatever the editor holds at retry time; the panel stays open
+    after a copy and every variant remains copyable; copying is NEVER implicit
+    in selection — 1/2/3 only highlights), AD-3 (CorrectionCompleted is
+    authoritative and REPLACES whatever the UI accumulated from deltas; deltas
+    are a progressive-rendering optimisation, never the record of truth, and
+    textDelta is an incremental fragment the UI concatenates per register —
+    deltas may arrive for registers in any order and interleaved), AD-2 (the
+    event and value types are fixed verbatim; the panel reads them, it does not
+    reshape them), AD-4 (hiding the panel does NOT cancel an in-flight
+    correction — it runs to its terminal event and is persisted; only Retry, a
+    new correction, and shutdown cancel), AD-1 (ui imports application and
+    read-only domain types, never infrastructure), and the Consistency
+    Conventions "State mutation" row (immutable state with copyWith; a single
+    controller per surface owns state; widgets never mutate state outside their
+    own ephemeral UI concerns).
+
+    CAP-13 is specific: the error is shown INLINE in the panel — not a toast,
+    not a separate window — replacing the empty or half-streamed suggestion,
+    with a Retry action.
+
+    CAP-10 is specific: the original and at least one variant must be readable
+    at the same time WITHOUT scrolling one out of view.
+
+    This story closes no deferred-work item, but it carries one follow-through
+    from story 3: the empty-submit guard lives in the controller as the
+    invariant; add a disabled Correct action here as the UI affordance on top of
+    it, not instead of it.
+
+    The spine's Deferred section leaves panel visual design, spacing and
+    keyboard-focus order to this story — the widgets own it. It also leaves the
+    shipped preset's concrete prompt wording out of scope (SPEC puts
+    output-quality tuning out of scope), so do not tune prompts here.
+
+    This container has no keybinder-3.0, no xdg-desktop-portal and no compositor
+    — write the code, mark tests that need a real desktop as skipped with an
+    explicit reason, and never fake a passing test. Flutter widget tests run
+    headless and must cover the streaming render, the delta-then-authoritative-
+    completed replacement, 1/2/3 selection, per-suggestion copy, and the inline
+    error plus Retry replaying the captured text. Cite the CAP id in each test
+    name.
+- id: "10"
+  title: Settings UI
+  description: >-
+    Build the settings surface for provider, preset and hotkey, writing through
+    ConfigStore, and render the effective hotkey registration with its binding
+    authority so the X11-authoritative / Wayland-advisory split is visible.
+    Delivers CAP-8's in-app half and CAP-12's settings surface.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-10 (the settings screen renders the RETURNED
+    HotkeyRegistration, never the requested binding; when authority ==
+    compositor it presents the field as a PREFERENCE and displays the effective
+    combination read back from the portal; subscribe to ShortcutsChanged so a
+    rebind made in the compositor updates the UI; when effective is null the UI
+    must say the backend cannot report it rather than showing the request), AD-13
+    (every settings mutation goes through ConfigStore and writes through to the
+    config file — an in-memory-only settings surface is ruled out by the SPEC),
+    AD-11 (the Wayland side of what is being displayed; the portal owns the
+    binding), AD-5 (changing provider or preset changes config; the composition
+    root is what resolves the active pair — the settings UI must not select a
+    provider itself), AD-12 (when hotkeys are unavailable on this compositor the
+    settings screen states it, alongside the tray), AD-1 (ui imports application
+    and read-only domain types only).
+
+    The SPEC's Ratified Divergence section is the behaviour contract for this
+    screen: in-app settings are AUTHORITATIVE on X11 and ADVISORY on Wayland,
+    and the screen shows which regime is active alongside the effective
+    combination. Do not present the hotkey as app-owned on both display servers.
+
+    This story closes no deferred-work item. It is the consumer that motivated
+    HotkeyBinding value equality — that equality was added in story 4, so
+    compare bindings with == here rather than re-adding it.
+
+    This container has no keybinder-3.0, no xdg-desktop-portal and no compositor
+    — write the code, mark tests that need a real desktop as skipped with an
+    explicit reason, and never fake a passing test. Widget tests over a fake
+    GlobalHotkey returning each BindingAuthority, plus a null effective, plus a
+    ShortcutsChanged emission, run headless and must not be skipped.
+- id: "11"
+  title: Packaging and sidecar provisioning
+  description: >-
+    Ship the two .desktop entries and make the Python sidecar reproducible on a
+    fresh machine: the AD-11 app-id desktop file that the Wayland hotkey
+    functionally depends on, the autostart entry, a repeatable pinned
+    .venv-sidecar, a single-source version pin, and the fake-CLI harness that
+    makes the sidecar's error branches testable.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    ADs that bind this story: AD-11 (the app id must be reverse-DNS AND have an
+    installed .desktop file of the same basename — shipping
+    com.divertedriver.HotkeyGrammarCorrector.desktop into
+    ~/.local/share/applications/ is a HARD REQUIREMENT of the hotkey working,
+    not packaging polish; GNOME discards the bind without it; the file belongs
+    at linux/packaging/com.divertedriver.HotkeyGrammarCorrector.desktop per the
+    spine's Structural Seed), AD-19 (the sidecar ships as a versioned asset
+    under assets/sidecar/ with claude_agent_sdk pinned in a requirements.txt
+    beside it; both interpreter path and sidecar path are config values; an
+    interpreter that cannot import the package yields providerUnavailable with a
+    message naming the missing package; the chain is Dart to Python to the
+    `claude` CLI, and `claude` must be on PATH), AD-14 (autostart pairs with the
+    singleton lock — an autostarted daemon plus a manual launch must not produce
+    two instances). Autostart goes to ~/.config/autostart/ and is SEPARATE from
+    the app-id entry in ~/.local/share/applications/, per the spine's
+    Operational envelope.
+
+    Deferred-work items this story closes (from
+    _bmad-output/implementation-artifacts/deferred-work.md — retain each heading;
+    when resolved, set `status: done <date>` and add a `resolution:` citing evidence):
+
+    1. source_spec spec-claude-agent-sdk-provider.md — "Sidecar provisioning has
+    no story — nothing creates the pinned .venv-sidecar on a fresh machine, no
+    CI exists so the live smoke can skip silently everywhere, no code derives
+    the installed flutter_assets sidecar path for a default config, and the
+    0.2.132 pin is duplicated (spine Stack table + requirements.txt) with no
+    drift check." Address all four parts: a repeatable provisioning step that
+    creates the pinned .venv-sidecar; a path derivation that finds the sidecar
+    inside installed flutter_assets so the default config works on an installed
+    build, not just from the repo; a drift check that fails when the spine's
+    Stack table and requirements.txt disagree on the claude_agent_sdk version;
+    and a decision on CI. On CI: the spine's Operational envelope says there is
+    no CI deployment target in MVP, so do NOT invent a deployment pipeline — but
+    the live smoke skipping silently on every machine is the real defect. At
+    minimum make the skip LOUD (report skipped-and-why in the run output) and
+    document the one command a developer runs to execute it for real. If you add
+    a CI config, keep it to running dart analyze and dart test.
+
+    2. source_spec spec-claude-agent-sdk-provider.md — "The sidecar's remaining
+    non-happy branches (ResultMessage.is_error -> providerError; zero-delta
+    AssistantMessage fallback) need a fake-claude-CLI harness to be testable —
+    only the ImportError and CLI-missing branches are cheaply reachable today."
+    Build that harness: a stub `claude` binary on PATH that the Python SDK
+    spawns, driven by fixtures, and tests over both named branches. This is the
+    test-infrastructure investment the earlier slice deferred.
+
+    Also note for the completion notes, do not act on it here: the spine's
+    Deferred section says the packaging FORMAT (deb / Flatpak / AppImage) is
+    undecided and that Flatpak sandboxing changes the AD-11 handshake — a
+    sandboxed app must NOT call Registry.Register. This story ships desktop
+    entries and provisioning, not a package format.
+
+    This container has no keybinder-3.0, no xdg-desktop-portal and no compositor
+    — write the code, mark tests that need a real desktop as skipped with an
+    explicit reason, and never fake a passing test. Desktop-entry validity
+    (desktop-file-validate-style checks on the file's own contents) and the
+    version drift check are testable headlessly and must not be skipped.

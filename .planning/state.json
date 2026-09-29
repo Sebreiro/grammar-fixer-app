@@ -1,0 +1,23 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": null,
+  "phases": [
+    {
+      "number": "1",
+      "name": "Hotkey Truth",
+      "status": "complete"
+    },
+    {
+      "number": "2",
+      "name": "Daemon Truth (Settings, Panel, Teardown, Provider, Spine)",
+      "status": "complete"
+    }
+  ],
+  "next": {
+    "command": "/gsd:progress",
+    "label": "Show progress",
+    "reason": "Unsure of state — showing progress"
+  },
+  "updated_at": "2026-09-26T18:12:36.261Z"
+}

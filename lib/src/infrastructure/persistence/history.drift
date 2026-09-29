@@ -1,0 +1,25 @@
+-- AD-7's schema, verbatim. The only departure from the spine is the
+-- drift-only `AS suggestionText` annotation, which renames the generated Dart
+-- getter (drift's own Table base class already declares `text()`); the SQL
+-- column stays `text`.
+
+CREATE TABLE corrections (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at    INTEGER NOT NULL,   -- unix millis, UTC
+  input_text    TEXT    NOT NULL,   -- the edited text actually sent (CAP-3)
+  preset_id     TEXT    NOT NULL,
+  provider_id   TEXT    NOT NULL,
+  model         TEXT    NOT NULL,
+  latency_ms    INTEGER NOT NULL,
+  outcome       TEXT    NOT NULL,   -- 'completed' | 'failed'
+  failure_kind  TEXT             -- CorrectionFailureKind.name, NULL when completed
+);
+
+CREATE TABLE suggestions (
+  correction_id INTEGER NOT NULL REFERENCES corrections(id) ON DELETE CASCADE,
+  register      TEXT    NOT NULL,   -- SuggestionRegister.name
+  text          TEXT    NOT NULL AS suggestionText,
+  PRIMARY KEY (correction_id, register)
+);
+
+CREATE INDEX corrections_created_at_idx ON corrections (created_at);

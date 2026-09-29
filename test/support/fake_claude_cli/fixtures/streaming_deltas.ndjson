@@ -1,0 +1,4 @@
+{"type": "stream_event", "uuid": "fake-delta-1", "session_id": "fake-session", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "FORMAL: I went"}}}
+{"type": "stream_event", "uuid": "fake-delta-2", "session_id": "fake-session", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": " to the store yesterday.\nCASUAL: I went to the store yesterday.\nSHORTER: I went to the store.\nEND"}}}
+{"type": "assistant", "uuid": "fake-assistant-1", "session_id": "fake-session", "message": {"role": "assistant", "model": "claude-sonnet-5", "content": [{"type": "text", "text": "FORMAL: I went to the store yesterday.\nCASUAL: I went to the store yesterday.\nSHORTER: I went to the store.\nEND"}]}}
+{"type": "result", "subtype": "success", "duration_ms": 12, "duration_api_ms": 9, "is_error": false, "num_turns": 1, "session_id": "fake-session", "result": "done"}

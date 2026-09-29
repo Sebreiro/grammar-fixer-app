@@ -61,3 +61,31 @@ nunit-*.xml
 _bmad/config.user.yaml
 _bmad/config.user.toml
 _bmad/custom/config.user.toml
+
+# Flutter / Dart (from the flutter create template)
+*.iml
+*.ipr
+*.iws
+.idea/
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+doc/api/
+.dart_tool/
+.flutter-plugins-dependencies
+**/generated_plugin_registrant.dart
+build/
+coverage/
+.flatpak-builder/
+
+# The sidecar's Python venv is provisioned per machine from
+# assets/sidecar/requirements.txt, never committed (AD-19).
+.venv-sidecar/
+.bmad-loop/profiles/
+.bmad-loop/claude-wrapper.sh
+.bmad-loop/session-exits.log

@@ -1,0 +1,34 @@
+app-id: com.divertedriver.HotkeyGrammarCorrector
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: hotkey_grammar_corrector
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --share=network
+  - --talk-name=org.freedesktop.secrets
+modules:
+  - name: hotkey-grammar-corrector
+    buildsystem: simple
+    build-commands:
+      - install -d /app/bin /app/lib /app/share/applications /app/share/icons/hicolor/32x32/apps /app/share/doc/hotkey-grammar-corrector/native-libraries
+      - cp -a bundle/. /app/bin/
+      - cp -a native-libs/. /app/lib/
+      - cp -a native-notices/. /app/share/doc/hotkey-grammar-corrector/native-libraries/
+      - install -m 644 desktop/com.divertedriver.HotkeyGrammarCorrector.desktop /app/share/applications/
+      - install -m 644 desktop/com.divertedriver.HotkeyGrammarCorrector.png /app/share/icons/hicolor/32x32/apps/
+    sources:
+      - type: dir
+        path: bundle
+        dest: bundle
+      - type: dir
+        path: desktop
+        dest: desktop
+      - type: dir
+        path: native-libs
+        dest: native-libs
+      - type: dir
+        path: native-notices
+        dest: native-notices

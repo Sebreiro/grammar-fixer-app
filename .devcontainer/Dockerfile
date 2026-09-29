@@ -91,6 +91,33 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 # Install Claude
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
+# Linux desktop build toolchain for Flutter (flutter build linux)
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  clang \
+  cmake \
+  ninja-build \
+  libgtk-3-dev \
+  libkeybinder-3.0-dev \
+  libayatana-appindicator3-dev \
+  pkg-config \
+  xz-utils \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+USER vscode
+
+# Install Flutter SDK (version pinned by the architecture spine's Stack table).
+# Checksum is the official sha256 for this release from
+# https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json
+ARG FLUTTER_VERSION=3.44.8
+ARG FLUTTER_SHA256=672089e001571a9fbb209a495c583580c0c6c73ef98999264ba07fa93ace332d
+RUN curl -fsSL -o /tmp/flutter.tar.xz \
+  "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz" \
+  && echo "${FLUTTER_SHA256}  /tmp/flutter.tar.xz" | sha256sum -c \
+  && tar xf /tmp/flutter.tar.xz -C /home/vscode \
+  && rm /tmp/flutter.tar.xz \
+  && /home/vscode/flutter/bin/flutter --disable-analytics
+ENV PATH=$PATH:/home/vscode/flutter/bin
+
 
 # Copy and set up firewall script
 # COPY init-firewall.sh /usr/local/bin/

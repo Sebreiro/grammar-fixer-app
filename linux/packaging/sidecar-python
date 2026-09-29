@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+package_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f /.flatpak-info ]]; then
+  interpreter=/usr/bin/python3
+else
+  interpreter="${HGC_PYTHON:-python3}"
+fi
+"$interpreter" -c 'import sys; assert sys.version_info >= (3, 11), "Python 3.11+ is required"'
+export PYTHONPATH="${package_root}/sidecar-packages${PYTHONPATH:+:${PYTHONPATH}}"
+export CLAUDE_CODE_CLI_PATH="${package_root}/sidecar-packages/claude_agent_sdk/_bundled/claude"
+[[ -x "$CLAUDE_CODE_CLI_PATH" ]] || { echo 'Bundled Claude SDK CLI is missing' >&2; exit 1; }
+exec "$interpreter" "$@"

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+app_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+bundle="$app_dir/usr/bin"
+export LD_LIBRARY_PATH="$app_dir/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+case "${1-}" in
+  --install-desktop)
+    [[ -n "${APPIMAGE:-}" && "$APPIMAGE" = /* ]] || {
+      echo 'AppImage runtime did not supply its path' >&2
+      exit 1
+    }
+    exec "$app_dir/tool/install_desktop_entries.sh" --exec "$APPIMAGE"
+    ;;
+  --sidecar)
+    shift
+    exec "$bundle/sidecar-python" \
+      "$bundle/data/flutter_assets/assets/sidecar/claude_agent_sdk_sidecar.py" "$@"
+    ;;
+esac
+
+# The AppImage mount changes each run. Keep package paths in this process's
+# environment while the persisted interpreter points at the AppImage itself.
+export PYTHONPATH="$bundle/sidecar-packages${PYTHONPATH:+:$PYTHONPATH}"
+export CLAUDE_CODE_CLI_PATH="$bundle/sidecar-packages/claude_agent_sdk/_bundled/claude"
+exec "$bundle/hotkey_grammar_corrector" "$@"

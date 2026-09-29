@@ -1,0 +1,2100 @@
+diff --git a/lib/src/application/correction_controller.dart b/lib/src/application/correction_controller.dart
+index 76479e7..b1c1f51 100644
+--- a/lib/src/application/correction_controller.dart
++++ b/lib/src/application/correction_controller.dart
+@@ -48,9 +48,10 @@ final class CorrectionController {
+   }) {
+     _visibilityChanges = panelVisibility.changes.listen(
+       _onVisibilityChanged,
+-      // AD-15 backstop: the port promises a plain bool stream. An adapter
+-      // that errors instead must not end this subscription — the next show
+-      // still has to start a session.
++      // AD-15 backstop: the port promises a plain stream of
++      // `PanelVisibilityState`. An adapter that errors instead must not end
++      // this subscription — the next `shown` still has to be decided on, and
++      // the departure remembered below is what decides it.
+       onError: (Object error) => _log(
+         () => _logger.error(
+           'the panel visibility stream errored',
+@@ -67,7 +68,7 @@ final class CorrectionController {
+   final Clock _clock;
+   final Logger _logger;
+ 
+-  late final StreamSubscription<bool> _visibilityChanges;
++  late final StreamSubscription<PanelVisibilityState> _visibilityChanges;
+ 
+   /// Broadcast: the panel and the tray may both watch a session.
+   final StreamController<CorrectionState> _changes =
+@@ -77,6 +78,21 @@ final class CorrectionController {
+ 
+   int _sessionToken = 0;
+ 
++  /// The last departure [PanelVisibility.changes] reported.
++  ///
++  /// The whole of the state AD-18's three-way rule needs: a `shown` begins a
++  /// session when the panel left as a
++  /// [PanelVisibilityState.dismissed] and not otherwise. Starts at `dismissed`,
++  /// which is what makes the first summon of the daemon's life a session
++  /// without a special case for it.
++  ///
++  /// Only a departure is recorded, never [PanelVisibilityState.shown]: the
++  /// question this answers is "where did the panel go last time", and a `shown`
++  /// is not an answer to it. Two departures in a row cannot arrive — `changes`
++  /// emits on a transition, so the second would find the panel already away —
++  /// but if one did, the later one is the live fact and overwrites.
++  PanelVisibilityState _lastDeparture = PanelVisibilityState.dismissed;
++
+   /// Bumped by every copy attempt, and by every new run and new session.
+   ///
+   /// A clipboard write is IPC and two of them can be in flight at once — the
+@@ -316,24 +332,44 @@ final class CorrectionController {
+     await Future.wait(_pendingSaves.toList());
+   }
+ 
+-  void _onVisibilityChanged(bool visible) {
++  /// AD-18's session rule, and the only place it lives.
++  ///
++  /// The port says where the window went; what that costs a session is decided
++  /// here, so the rule can change without re-teaching an adapter.
++  ///
++  /// A dismissal is the user saying they are done with this window, so the
++  /// summon after it opens a fresh session — cleared state, editor re-seeded
++  /// from the *current* clipboard (CAP-2). An iconify or a focus loss is not:
++  /// the same window comes back with the same work in it, so nothing is emitted
++  /// at all and the panel keeps the text, the suggestions and the error it had.
++  ///
++  /// No departure cancels anything. AD-4's three cancellations do not include
++  /// one: an in-flight correction runs to its terminal event and is still
++  /// persisted (CAP-7), whichever way the panel went away.
++  void _onVisibilityChanged(PanelVisibilityState visibility) {
+     if (_disposed) {
+       // A rejected cancel leaves this subscription live, and a session begun
+       // now would re-seed from the clipboard — display-server IPC issued by a
+       // controller that is already torn down.
+       return;
+     }
+-    if (!visible) {
+-      // Hiding is deliberately not one of AD-4's three cancellations: the
+-      // correction runs to its terminal event and is still persisted (CAP-7).
+-      return;
++    switch (visibility) {
++      case PanelVisibilityState.shown:
++        if (_lastDeparture == PanelVisibilityState.dismissed) {
++          _beginSession();
++        }
++      case PanelVisibilityState.dismissed:
++      case PanelVisibilityState.iconified:
++      case PanelVisibilityState.focusLost:
++        _lastDeparture = visibility;
+     }
+-    _beginSession();
+   }
+ 
+-  /// Every show starts a fresh session: previous suggestions, error, and
+-  /// edits are cleared and the editor is re-seeded from the *current*
+-  /// clipboard (AD-18, CAP-2).
++  /// Starts a fresh session: previous suggestions, error, and edits are cleared
++  /// and the editor is re-seeded from the *current* clipboard (AD-18, CAP-2).
++  ///
++  /// Reached from a summon that follows a dismissal, and from nothing else —
++  /// see [_onVisibilityChanged] for which departures do not lead here.
+   void _beginSession() {
+     final token = ++_sessionToken;
+     _copyToken++; // a copy in flight belongs to the session that is ending
+@@ -375,11 +411,17 @@ final class CorrectionController {
+     final seeded = clipboardText ?? '';
+     if (seeded.isEmpty) {
+       // Nothing to pre-fill: the editor is already empty (the guard above says
+-      // so), so this would emit a state equal to the one it replaces. That is
+-      // not a cosmetic saving — `CorrectionState.empty` is exactly what
+-      // `_beginSession` emits and the panel's signal that a session just began,
+-      // so a second identical emission one IPC round-trip later pulled focus
+-      // back to the editor out from under a user who had moved it.
++      // so), so this would emit a state the panel has nothing to do with.
++      //
++      // Not the focus defect this guard once carried. That one was real while
++      // `isFreshSession` was the value comparison `this == empty`: a second
++      // emission of that value one IPC round-trip later read as a second
++      // session beginning and pulled focus back to the editor out from under a
++      // user who had moved it. The marker is now stamped on the one state
++      // `_beginSession` emits and `copyWith` does not carry it, so the seeded
++      // state below reports no session either way. What is left is the ordinary
++      // reason: an emission that changes nothing is noise on a stream two
++      // widgets rebuild from.
+       return;
+     }
+     _setState(_state.copyWith(editorText: seeded));
+diff --git a/lib/src/application/correction_state.dart b/lib/src/application/correction_state.dart
+index eca76a3..21201db 100644
+--- a/lib/src/application/correction_state.dart
++++ b/lib/src/application/correction_state.dart
+@@ -7,8 +7,9 @@ enum CorrectionStatus { idle, running, completed, failed }
+ 
+ /// Everything the panel renders for one session (AD-18).
+ ///
+-/// A session begins at [empty] on every show, so nothing an earlier session
+-/// produced can be mistaken for the current one.
++/// A session begins at [empty], so nothing an earlier session produced can be
++/// mistaken for the current one. Which returns of the panel begin one is
++/// `CorrectionController`'s decision, not this type's — see [isFreshSession].
+ final class CorrectionState {
+   const CorrectionState({
+     required this.editorText,
+@@ -18,16 +19,21 @@ final class CorrectionState {
+     this.failure,
+     this.selectedRegister,
+     this.copyFailure,
++    this.isFreshSession = false,
+   }) : assert(
+          (status == CorrectionStatus.failed) == (failure != null),
+          'a failure is present exactly when the status is failed',
+        );
+ 
+   /// A fresh session: no seed yet, no suggestions, no error (AD-18).
++  ///
++  /// The one value carrying [isFreshSession], because it is the one state
++  /// `CorrectionController._beginSession` emits.
+   static const CorrectionState empty = CorrectionState(
+     editorText: '',
+     status: CorrectionStatus.idle,
+     suggestionTexts: {},
++    isFreshSession: true,
+   );
+ 
+   /// The micro-editor's content (CAP-3): seeded from the clipboard on every
+@@ -66,26 +72,30 @@ final class CorrectionState {
+   /// would re-run a correction that already succeeded.
+   final String? copyFailure;
+ 
+-  /// Whether this state is the fresh session a show begins (AD-18).
++  /// Whether this state *is* the beginning of a session (AD-18).
+   ///
+-  /// [empty] is exactly what `_beginSession` emits and nothing else *builds*, so
+-  /// this is the signal two widgets need: the panel brings the caret back to the
+-  /// editor, and the daemon's home view returns to the panel, because CAP-1
+-  /// promises the hotkey summons the *correction panel* and a window that comes
+-  /// up showing settings breaks it.
++  /// The signal two widgets need: the panel brings the caret back to the editor,
++  /// and the daemon's home view returns to the panel, because CAP-1 promises the
++  /// hotkey summons the *correction panel* and a window that comes up showing
++  /// settings breaks it.
+   ///
+-  /// A value comparison, and its one imprecision is written down rather than
+-  /// papered over: an idle session whose editor the user clears by hand produces
+-  /// the same value. Both consumers are idempotent under that — focus is already
+-  /// in the editor, and the panel is already the view — which is why the
+-  /// inference is accepted here instead of widening the state. Named once so
+-  /// there is one home for it rather than the same comparison written twice
+-  /// (deferred-work DW-54).
+-  bool get isFreshSession => this == empty;
++  /// **Stamped, never derived.** It is true on [empty] — the one state
++  /// `CorrectionController._beginSession` emits — and false everywhere else,
++  /// including on every state [copyWith] builds from that one: a state derived
++  /// from a session beginning is not itself a session beginning. So an idle
++  /// session whose editor the user clears by hand is `!=` [empty] and reports
++  /// false here, which is what the earlier `this == empty` comparison could not
++  /// say (DW-54).
++  final bool isFreshSession;
+ 
+   /// Cannot clear [submittedText], [failure], [selectedRegister] or
+   /// [copyFailure]; the transitions that drop them build a state directly
+   /// instead.
++  ///
++  /// [isFreshSession] is deliberately absent, in both directions: it cannot be
++  /// set here and it is never carried over. A state built from another is an
++  /// update *within* a session — a keystroke, a streamed delta, the clipboard
++  /// seed landing — and only `_beginSession` begins one.
+   CorrectionState copyWith({
+     String? editorText,
+     String? submittedText,
+@@ -111,6 +121,10 @@ final class CorrectionState {
+   /// `select` both fall back to identity without it. [suggestionTexts]
+   /// compares as a map — it is rebuilt on every delta, so an identity compare
+   /// would make every state distinct by construction.
++  ///
++  /// [isFreshSession] takes part, and that is load-bearing rather than
++  /// completeness for its own sake: it is what stops a hand-cleared editor from
++  /// comparing equal to [empty] (DW-54).
+   @override
+   bool operator ==(Object other) {
+     if (identical(this, other)) {
+@@ -123,6 +137,7 @@ final class CorrectionState {
+         failure == other.failure &&
+         selectedRegister == other.selectedRegister &&
+         copyFailure == other.copyFailure &&
++        isFreshSession == other.isFreshSession &&
+         mapEquals(suggestionTexts, other.suggestionTexts);
+   }
+ 
+@@ -134,6 +149,7 @@ final class CorrectionState {
+     failure,
+     selectedRegister,
+     copyFailure,
++    isFreshSession,
+     mapHash(suggestionTexts),
+   );
+ }
+diff --git a/lib/src/domain/panel/panel_visibility.dart b/lib/src/domain/panel/panel_visibility.dart
+index d4ede78..9327af1 100644
+--- a/lib/src/domain/panel/panel_visibility.dart
++++ b/lib/src/domain/panel/panel_visibility.dart
+@@ -1,15 +1,69 @@
++/// Where the panel window is, and — for the three ways it goes away — which
++/// gesture put it there.
++///
++/// Declared beside [PanelVisibility] rather than in a file of its own, the way
++/// `CorrectionFailureKind` sits beside the `CorrectionEvent` family: it is the
++/// vocabulary of one member of one port and has no life apart from it.
++///
++/// **Descriptive only.** Each member says where the window went, never what
++/// that costs a session. AD-18's rule — which returns clear the panel and
++/// re-seed from the clipboard — is `CorrectionController`'s, so that the rule
++/// can change without re-teaching an adapter.
++enum PanelVisibilityState {
++  /// The panel is up: a `show()` request, an external map, or a de-iconify.
++  ///
++  /// The only member for which [isVisible] is true, and therefore the only one
++  /// at which a session can begin.
++  shown,
++
++  /// The panel was put away *as a `hide()` request would put it away*: the
++  /// hotkey toggle, the tray entry, the window's close control, or an external
++  /// unmap.
++  ///
++  /// The departure that **ends** a session. The next [shown] after it clears
++  /// the panel and re-seeds the editor from the current clipboard (AD-18,
++  /// CAP-2).
++  dismissed,
++
++  /// The panel was iconified — a task-bar minimise, a workspace switch, a
++  /// show-desktop gesture.
++  ///
++  /// The user did not ask to be done with the window, so the session
++  /// **survives**: the next [shown] emits nothing and the panel comes back with
++  /// the text, the suggestions and the error it had.
++  iconified,
++
++  /// The panel took itself down because the window lost the keyboard (CAP-14).
++  ///
++  /// A dismissal of the *window*, not of the work in it, so the session
++  /// **survives** exactly as it does across an [iconified] departure.
++  focusLost;
++
++  /// Whether the panel is on screen in this state.
++  ///
++  /// The mirror [PanelVisibility.isVisible] carries, written from the same
++  /// value the matching [PanelVisibility.changes] event reports.
++  bool get isVisible => this == shown;
++}
++
+ abstract interface class PanelVisibility {
+   /// Synchronous in-process mirror. Never an IPC query.
+   bool get isVisible;
+ 
+-  /// Emits on every change, including focus-loss hides (CAP-14).
++  /// Emits on every change, including focus-loss hides (CAP-14), and says which
++  /// of [PanelVisibilityState]'s departures took the window away.
+   ///
+   /// Broadcast: a state-change notification stream with multiple independent
+   /// listeners (the panel widget, the correction controller), in the same
+   /// terms `ConfigStore.changes` uses. Both consumers subscribe at startup, so
+   /// a single-subscription implementation would throw on the second listener
+   /// the moment the graph is built.
+-  Stream<bool> get changes;
++  ///
++  /// Emits **exactly on a transition** of [isVisible], in either direction and
++  /// whatever caused it — so nothing here reports a [show] at a visible panel
++  /// or a [hide] at a hidden one, and two departures in a row cannot both
++  /// emit: the second finds the panel already away.
++  Stream<PanelVisibilityState> get changes;
+ 
+   /// Asks for the already-constructed window to be shown **and focused**.
+   ///
+@@ -32,5 +86,9 @@ abstract interface class PanelVisibility {
+ 
+   /// Asks for the window to be hidden. Its future carries the same meaning as
+   /// [show]'s: accepted and out of the queue, not "the window moved".
++  ///
++  /// A request to hide is the user saying they are done with this window, so
++  /// what [changes] reports for it is [PanelVisibilityState.dismissed] — the
++  /// departure that ends a session.
+   Future<void> hide();
+ }
+diff --git a/lib/src/infrastructure/panel/window_manager_panel_visibility.dart b/lib/src/infrastructure/panel/window_manager_panel_visibility.dart
+index ecdb8fb..5159069 100644
+--- a/lib/src/infrastructure/panel/window_manager_panel_visibility.dart
++++ b/lib/src/infrastructure/panel/window_manager_panel_visibility.dart
+@@ -94,9 +94,11 @@ import 'panel_window.dart';
+ /// `minimize` is believed, the `restore` that undoes it is swallowed, and the
+ /// mirror is left reading false over a window that is mapped with nothing able
+ /// to correct it. `main.dart` sets `setSkipTaskbar(true)`, so the hotkey is the
+-/// only route back to that panel, and with the mirror false that press reads as
+-/// a *summon* — a fresh AD-18 session discarding whatever the user had typed
+-/// into a panel that never left the screen. So a believed `minimize` arms a
++/// only route back to that panel, and against a false mirror that press
++/// resolves to [show] rather than [hide] — so the panel is on screen and there
++/// is no longer any way to put it away, while the `_focused` clear on the way
++/// down has already taken CAP-14's dismissal with it. So a believed `minimize`
++/// arms a
+ /// one-shot latch ([_believedMinimize]) and the next `restore` consumes it,
+ /// moving the mirror back whatever `_outstanding` reads. Every other `restore`
+ /// keeps the guard, unchanged, and that is what keeps the load-bearing case
+@@ -119,8 +121,11 @@ import 'panel_window.dart';
+ /// arrives with nothing of ours outstanding and is believed like any other
+ /// window-manager event. The
+ /// mirror goes back to true — *correctly*, because the window really did map —
+-/// and [changes] emits a second `true`, so `CorrectionController` starts a
+-/// fresh session (AD-18). The panel the user dismissed is on screen again, and
++/// and [changes] emits `shown`. The departure it follows is the `dismissed` the
++/// user's own hide recorded, so `CorrectionController` starts a fresh session
++/// (AD-18) — which is this rule applied correctly rather than a defect of it:
++/// the user did ask for that panel to go away. The panel the user dismissed is
++/// on screen again, and
+ /// nothing here undoes it: the call was abandoned rather than cancelled, and
+ /// issuing a compensating `hide` would be a recovery policy nobody has decided
+ /// on.
+@@ -128,9 +133,10 @@ import 'panel_window.dart';
+ /// All three calls land this way, not just `show`. An abandoned `focus` is
+ /// `gtk_window_present`, which maps *and* raises, so it re-maps a dismissed
+ /// panel and takes the keyboard with it; an abandoned `hide` landing after a
+-/// later `show` completed unmaps a panel the user just asked for, and because
+-/// the next press re-seeds from the clipboard (AD-18) whatever was typed into
+-/// that window is discarded. Same mechanism, same absence of a remedy — the
++/// later `show` completed unmaps a panel the user just asked for, and its `hide`
++/// event is attributed `dismissed` like any other unmap the window reports — so
++/// the next press re-seeds from the clipboard (AD-18) and whatever was typed
++/// into that window is discarded. Same mechanism, same absence of a remedy — the
+ /// direction differs, and so does which of the two costs the user pays.
+ ///
+ /// What is preserved is the property the rest of this adapter rests on — the
+@@ -145,9 +151,19 @@ import 'panel_window.dart';
+ /// instead of a chain parked forever.
+ ///
+ /// [changes] emits **exactly on a transition** of [isVisible], in either
+-/// direction and whatever caused it. `CorrectionController` starts a fresh
+-/// session on every `true` (AD-18), so a duplicate emission is a duplicate
+-/// clipboard read and a discarded editor.
++/// direction and whatever caused it — and every departure is *attributed*: a
++/// requested hide and an external unmap are `dismissed`, an iconify is
++/// `iconified`, and CAP-14's focus-loss hide is `focusLost`. The attribution is
++/// made at the site that moves the mirror, which is why [_setMirror] takes a
++/// [PanelVisibilityState] rather than a bool: nothing here can infer from a
++/// false mirror how the window came to be away, and every caller can.
++///
++/// What that buys is stated in `CorrectionController`, not here — the port is
++/// descriptive and AD-18's rule belongs to the ring above it. The consequence
++/// worth knowing at this end is that a duplicate emission is no longer uniformly
++/// expensive: a spurious `shown` after a `dismissed` is still a duplicate
++/// clipboard read and a discarded editor, while one after an `iconified` or a
++/// `focusLost` costs nothing at all.
+ ///
+ /// This type owns the [PanelWindow] it is given: [dispose] disposes it, which
+ /// is what deregisters the window listener.
+@@ -203,7 +219,8 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+ 
+   /// Broadcast: the panel widget and the correction controller are two
+   /// independent consumers, which is what the port declares.
+-  final StreamController<bool> _changes = StreamController<bool>.broadcast();
++  final StreamController<PanelVisibilityState> _changes =
++      StreamController<PanelVisibilityState>.broadcast();
+ 
+   bool _visible = false;
+   bool _disposed = false;
+@@ -237,7 +254,8 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   /// Four write sites, and naming all of them here is the point of this doc:
+   /// **armed** by a `minimize` that actually took the panel down, **consumed**
+   /// by the next `restore` — the arm a reader hunting for this flag is looking
+-  /// for — and **cleared** by [show] and [hide], which is two sites, not one.
++  /// for — and **cleared** by [show] and [_hide], which is [hide]'s whole body,
++  /// and two sites, not one.
+   /// The suite's negative-control record measures those two separately (controls
+   /// 18 and 19), and the measurement is **not** the symmetric one earlier prose
+   /// here claimed: [show]'s clear alone fails nothing, [hide]'s alone fails one
+@@ -256,7 +274,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   /// without consulting the guard, and every `restore` that finds it clear takes
+   /// the guard unchanged.
+   ///
+-  /// Cleared by [show] and [hide], where an intent is *expressed* rather than
++  /// Cleared by [show] and [_hide], where an intent is *expressed* rather than
+   /// where the mirror happens to move — the same rule [_deferredBlur] follows,
+   /// and for a sharper reason: after one of our requests a `restore` may be that
+   /// request's own echo, which is the case the guard exists for, and
+@@ -290,7 +308,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   ///
+   /// Dropped by three writers besides that release, all saying the same thing —
+   /// a blur belongs to the intent it was raised under, and any newer intent
+-  /// voids it. [show] and [hide] drop it because that is where an intent is
++  /// voids it. [show] and [_hide] drop it because that is where an intent is
+   /// *expressed*, including the two requests that write no mirror at all
+   /// (a `show()` at a visible panel, a `hide()` at a hidden one); [_setMirror]
+   /// drops it on any transition, which is the backstop for the intents the
+@@ -305,7 +323,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   bool get isVisible => _visible;
+ 
+   @override
+-  Stream<bool> get changes => _changes.stream;
++  Stream<PanelVisibilityState> get changes => _changes.stream;
+ 
+   @override
+   Future<void> show() {
+@@ -335,12 +353,27 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+     // stranded dismissal the guard exists to prevent.
+     _deferredBlur = false;
+     _believedMinimize = false;
+-    _setMirror(true);
++    _setMirror(PanelVisibilityState.shown);
+     return _enqueue(true);
+   }
+ 
+   @override
+-  Future<void> hide() {
++  Future<void> hide() => _hide(PanelVisibilityState.dismissed);
++
++  /// The whole of [hide], with the departure [changes] will report as a
++  /// parameter.
++  ///
++  /// Split out because the two routes to a real unmap mean different things to a
++  /// session and the identical thing to the window. A requested hide — the
++  /// hotkey toggle, the tray entry, the `close` arm — is the user saying they
++  /// are done, so it is [PanelVisibilityState.dismissed]; the focus-loss hide
++  /// CAP-14 performs on the user's behalf is
++  /// [PanelVisibilityState.focusLost], and a session survives it. Nothing else
++  /// differs, so this is a parameter rather than a second copy of the body.
++  ///
++  /// A parameter and not a boolean flag (AGENTS.md §2): it selects the label on
++  /// an emission, not a behaviour, and the enum is the label's own type.
++  Future<void> _hide(PanelVisibilityState departure) {
+     if (_disposed) {
+       return Future<void>.value();
+     }
+@@ -351,7 +384,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+     // still waiting to see undone.
+     _deferredBlur = false;
+     _believedMinimize = false;
+-    _setMirror(false);
++    _setMirror(departure);
+     return _enqueue(false);
+   }
+ 
+@@ -498,7 +531,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+         // it, and a focus-in re-arms it there and then. Same owed runtime claim
+         // as the `restore` arm's, and the same accepted trade — stated in full
+         // at `_setMirror`'s `_focused` clear.
+-        _reconcile(true);
++        _reconcile(PanelVisibilityState.shown);
+       case 'restore':
+         // `gtk_window_deiconify` + `gtk_window_present`: the window is back.
+         //
+@@ -532,12 +565,15 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+         // here` in `test/platform/runtime-observation-checklist.md` carries it.
+         if (_believedMinimize) {
+           _believedMinimize = false;
+-          _setMirror(true);
++          _setMirror(PanelVisibilityState.shown);
+         } else {
+-          _reconcile(true);
++          _reconcile(PanelVisibilityState.shown);
+         }
+       case 'hide':
+-        _reconcile(false);
++        // An external unmap puts the panel exactly where a `hide()` request
++        // would have put it, so it carries the same departure: the window is
++        // gone and nothing says the user means to come back to this text.
++        _reconcile(PanelVisibilityState.dismissed);
+       case 'close':
+         // DW-12: a close is a dismissal, not an exit — the same intent CAP-14
+         // gives a focus loss, so it gets the same answer.
+@@ -567,7 +603,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+         // `hide` and `focus`, so a close can never be an echo of ours. It is
+         // structurally external, and `minimize` below now sits on that same
+         // side for the same reason (DW-31).
+-        _dismiss('close');
++        _dismiss('close', PanelVisibilityState.dismissed);
+       case 'minimize':
+         // Structurally external, exactly as `close` is: `minimize` comes from a
+         // GTK `window-state-event` and nothing this adapter calls iconifies, so
+@@ -594,19 +630,20 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+         // `_visible` guard can never re-arm it over a false mirror, so CAP-14's
+         // dismissal was dead for that panel's life. With `setSkipTaskbar(true)`
+         // the hotkey is the only route back, and against a false mirror that
+-        // press reads as a *summon*: a fresh AD-18 session discarding whatever
+-        // the user had typed into a panel that never left the screen. Hence the
+-        // latch armed below and consumed by the `restore` arm above — the two
+-        // halves of this change are one design, not one plus a follow-up.
++        // press resolves to `show()` rather than `hide()`: the panel is already
++        // on screen, so the press changes nothing the user can see and leaves
++        // them with a window nothing can put away. Hence the latch armed below
++        // and consumed by the `restore` arm above — the two halves of this
++        // change are one design, not one plus a follow-up.
+         //
+-        // The remaining cost of leaving `_reconcile` has two halves. A minimize
+-        // landing during one of our requests now emits a `changes` transition
+-        // the guard used to swallow, and every `true` after it starts a fresh
+-        // session (AD-18) — so a believed pair discards whatever was typed into
+-        // the panel. That is DW-30, live today in the nothing-outstanding case;
+-        // this change reaches one more timing window and no wider, and it was
+-        // ruled acceptable on exactly that ground. Suppressing the emission here
+-        // would redefine AD-18 rather than answer DW-30. And a mirror written
++        // The cost of leaving `_reconcile` is now one thing rather than two. A
++        // minimize landing during one of our requests emits a `changes`
++        // transition the guard used to swallow, and that emission is attributed
++        // `iconified` — so the `shown` after it begins no session and the panel
++        // comes back with whatever was typed into it. That was DW-30, and it is
++        // answered in `CorrectionController` rather than by suppressing an
++        // emission here, which would have redefined AD-18 instead. What remains
++        // is the other half: a mirror written
+         // here can supersede a request that is *queued but not yet started*:
+         // `_apply` returns early when `_visible` no longer matches the intent
+         // it was enqueued with, so a second press already waiting behind an
+@@ -617,12 +654,12 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+         // a queued summon that dies against a genuinely iconified window costs
+         // one press rather than stranding a dismissal.
+         //
+-        // Both halves taken deliberately: the alternative is a mirror that lies
+-        // about a window the user cannot see or reach. No claim is made here
+-        // that the editor was doomed anyway — a window manager that iconifies on
+-        // a workspace switch or a show-desktop gesture hands back the same
+-        // window with the same text in it, so the AD-18 session above is a real
+-        // cost and DW-30 is where it is answered.
++        // Taken deliberately: the alternative is a mirror that lies about a
++        // window the user cannot see or reach. And the departure named here is
++        // what makes that affordable — a window manager that iconifies on a
++        // workspace switch or a show-desktop gesture hands back the same window
++        // with the same text in it, and `iconified` is how the ring above is
++        // told to keep it.
+         if (_visible) {
+           // Armed only by a minimize that actually took the panel down, because
+           // that is what "believed" means here and what the `restore` arm is
+@@ -632,7 +669,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+           // arms nothing for the show's own deiconify echo to consume.
+           _believedMinimize = true;
+         }
+-        _setMirror(false);
++        _setMirror(PanelVisibilityState.iconified);
+       case 'focus':
+         // Believed whoever caused it, *while the mirror says a panel is up*.
+         // Our own `focus()` and the user clicking the panel both mean the
+@@ -728,11 +765,11 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   /// pair, and it does not weaken the paragraph above: [show] and [hide] clear
+   /// the latch where those intents are expressed, so an echo produced by one of
+   /// our own requests always finds it clear and is swallowed here as before.
+-  void _reconcile(bool visible) {
++  void _reconcile(PanelVisibilityState state) {
+     if (_outstanding > 0) {
+       return;
+     }
+-    _setMirror(visible);
++    _setMirror(state);
+   }
+ 
+   /// CAP-14's focus-loss hide, performed by the adapter because the
+@@ -811,7 +848,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+       _deferredBlur = true;
+       return;
+     }
+-    _dismiss('focus-loss');
++    _dismiss('focus-loss', PanelVisibilityState.focusLost);
+   }
+ 
+   /// Reconsiders a blur that [_onBlur] latched, now that the request chain has
+@@ -828,7 +865,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   /// `!_visible` is the backstop. It reads as the guard for "the panel was
+   /// already dismissed by a press while this request was in flight", and that
+   /// case is real — but it is answered before the release ever runs, by the
+-  /// latch drops in [show], [hide] and [_setMirror]: a press that put the panel
++  /// latch drops in [show], [_hide] and [_setMirror]: a press that put the panel
+   /// away dropped the latch on its way through, so this method returns at
+   /// `!_deferredBlur` above and never reaches here. With the latch set,
+   /// `_visible` is true by construction. The re-read stays because the
+@@ -838,7 +875,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   /// are redundant only with respect to each other. The suite's
+   /// negative-control record measures that pair as a control of its own.
+   ///
+-  /// `_disposed` is the same shape: [hide] returns without touching the window
++  /// `_disposed` is the same shape: [_hide] returns without touching the window
+   /// once the adapter is closed, so the [_dismiss] below is already inert by
+   /// the time it would matter. It is stated here so a later `_dismiss` that
+   /// reached the seam directly would not silently move a real window on the
+@@ -888,14 +925,17 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   /// cleared, and the late `focus` then meets the `focus` arm's `_visible` guard
+   /// over the mirror this dismissal just set false, so it is discarded too.
+   /// Nothing re-examines the decision — the release point is fixed at [_apply]'s
+-  /// `finally`, and there is no second one. The recovery press reads as a summon
+-  /// and AD-18 discards what was typed. Stated rather than answered, for the
+-  /// same reason as the paragraph above: both orderings are the same
+-  /// unattributable focus-in, and this seam cannot tell them apart.
++  /// `finally`, and there is no second one. What the user pays is the panel
++  /// disappearing under the click they just made; the recovery press brings it
++  /// back with its text, because the dismissal this method issues is attributed
++  /// `focusLost` and no session begins on the summon after one. Stated rather
++  /// than answered, for the same reason as the paragraph above: both orderings
++  /// are the same unattributable focus-in, and this seam cannot tell them
++  /// apart.
+   ///
+   /// The latch is dropped whether or not the dismissal happens: one round trip
+   /// answers it once, and a blur that no longer applies is not owed to any
+-  /// later request. [show], [hide] and [_setMirror] drop it too — see
++  /// later request. [show], [_hide] and [_setMirror] drop it too — see
+   /// [_deferredBlur] for the rule the four of them share.
+   void _releaseDeferredBlur() {
+     if (!_deferredBlur) {
+@@ -905,7 +945,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+     if (_disposed || !_visible || _focused) {
+       return;
+     }
+-    _dismiss('focus-loss');
++    _dismiss('focus-loss', PanelVisibilityState.focusLost);
+   }
+ 
+   /// Puts the panel away on the window's own initiative, and reduces a refusal
+@@ -924,16 +964,24 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   /// All three want the identical thing: a real `hide`, issued without awaiting
+   /// it, whose rejection must not
+   /// escape into the zone as an uncaught error in a daemon whose job is to stay
+-  /// up. The mirror has already led inside [hide], so a refusal costs the line
++  /// up. The mirror has already led inside [_hide], so a refusal costs the line
+   /// and nothing else.
+   ///
+   /// [cause] is a parameter rather than a flattened single message because the
+   /// two are different events to whoever reads the line: a window manager that
+   /// refuses the focus-loss hide is a compositor quirk, and one that refuses the
+   /// close hide leaves a toplevel on screen that the user explicitly dismissed.
+-  void _dismiss(String cause) {
++  ///
++  /// [departure] travels beside it and is **not** the same fact. [cause] is the
++  /// operator's vocabulary — which of two log lines to read — while [departure]
++  /// is the session's, and the two do not partition the call sites the same way:
++  /// both focus-loss routes carry one cause and one departure, but the `close`
++  /// arm's cause is its own while its departure is the one an ordinary [hide]
++  /// carries. Collapsing them into one parameter would tie the log wording to
++  /// AD-18's rule.
++  void _dismiss(String cause, PanelVisibilityState departure) {
+     unawaited(
+-      hide().catchError(
++      _hide(departure).catchError(
+         (Object error) => _log(
+           () => _logger.error(
+             'the window rejected the $cause hide',
+@@ -944,7 +992,14 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+     );
+   }
+ 
+-  void _setMirror(bool visible) {
++  /// Moves the mirror to [state] and reports it, or does neither.
++  ///
++  /// The single write point, and it takes the departure rather than a bool so
++  /// that the compiler forces every route to a false mirror to be named where
++  /// the move is made. There is no default and nothing is inferred here: this
++  /// method cannot tell an iconify from a dismissal, and a call site can.
++  void _setMirror(PanelVisibilityState state) {
++    final visible = state.isVisible;
+     if (_disposed || _visible == visible) {
+       return;
+     }
+@@ -959,7 +1014,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+     // this method early-returns above when the value does not change, so the
+     // two caller-side requests that write nothing — a `show()` at a visible
+     // panel, a `hide()` at a hidden one — would walk straight past it. Those
+-    // are dropped in [show] and [hide] instead, where the intent is expressed
++    // are dropped in [show] and [_hide] instead, where the intent is expressed
+     // rather than where the mirror moves, and the first of them is precisely
+     // the request DW-32 is about.
+     //
+@@ -1019,10 +1074,19 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+       // about.** Earlier prose here said "every other way of putting the panel
+       // away (the hotkey, the tray entry, the close control) keeps working
+       // throughout"; where the mirror reads false over a mapped window a press
+-      // resolves to [show], not [hide], so it re-summons — `changes` emits
+-      // `true` and AD-18 starts a fresh session over whatever the user had
+-      // typed. That is the DW-30 cost, reached by the one action the sentence
+-      // recommended. The close control is what still works.
++      // resolves to [show], not [hide], so it re-summons instead of dismissing.
++      // The close control is what still works.
++      //
++      // **What that re-summon costs depends on the departure that put the
++      // mirror there, and only one of the two cases above still pays (DW-30).**
++      // The refused hide recorded `PanelVisibilityState.dismissed` — the user
++      // did ask for the panel to go away — so the repairing press does begin a
++      // fresh AD-18 session over text that never left the screen. That residual
++      // is this rule applied correctly rather than a leftover of the one before
++      // it, and it is no longer "the DW-30 cost". The `minimize`/`restore` case
++      // recorded `PanelVisibilityState.iconified`, and a `shown` after one of
++      // those begins nothing, so a press against that mirror brings the panel
++      // back with its text.
+       //
+       // "Dead for that panel's life" describes the **reverted** asymmetric
+       // split and must not be reused for this design. There the mirror was
+@@ -1036,7 +1100,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+       // one of those.
+       _focused = false;
+     }
+-    _changes.add(visible);
++    _changes.add(state);
+   }
+ 
+   /// Runs one teardown step, reducing its failure to a log line: a daemon that
+diff --git a/test/application/correction_controller_test.dart b/test/application/correction_controller_test.dart
+index 4dbe553..f0e3b7a 100644
+--- a/test/application/correction_controller_test.dart
++++ b/test/application/correction_controller_test.dart
+@@ -30,8 +30,8 @@ void main() {
+   tearDown(() => harness.dispose());
+ 
+   group('seeding a session', () {
+-    test('CAP-2: every show re-seeds the editor from the current '
+-        'clipboard', () async {
++    test('CAP-2: a show after a dismissal re-seeds the editor from the '
++        'current clipboard', () async {
+       harness.clipboard.text = 'first copy';
+       await harness.show();
+       expect(harness.state.editorText, equals('first copy'));
+@@ -96,10 +96,15 @@ void main() {
+     test('CAP-2: an empty clipboard seeds no second state, so the panel is '
+         'not told a new session began twice (AD-18)', () async {
+       // `CorrectionState.empty` is what `_beginSession` emits and the panel's
+-      // only signal that a show just started — it puts the caret back in the
++      // only signal that a session just started — it puts the caret back in the
+       // editor on it. An empty clipboard used to re-emit an equal state one IPC
+-      // round-trip later, pulling focus back from wherever the user had moved
+-      // it in the meantime.
++      // round-trip later, pulling focus back from wherever the user had moved it
++      // in the meantime.
++      //
++      // The focus half of that is now answered twice over: `copyWith` does not
++      // carry `isFreshSession`, so a seeded state reports no session whatever
++      // it holds. What this row still pins is the emission itself — a state
++      // that changes nothing is noise on a stream two widgets rebuild from.
+       final states = <CorrectionState>[];
+       final subscription = harness.controller.changes.listen(states.add);
+       harness.clipboard.text = null;
+@@ -120,7 +125,7 @@ void main() {
+       expect(harness.state.status, equals(CorrectionStatus.idle));
+     });
+ 
+-    test('AD-18: a new show clears the previous session\'s '
++    test('AD-18: a show after a dismissal clears the previous session\'s '
+         'suggestions', () async {
+       await harness.show();
+       harness.controller.submit();
+@@ -138,6 +143,199 @@ void main() {
+     });
+   });
+ 
++  group('which returns begin a session (AD-18, DW-30)', () {
++    // The human's rule of 2026-08-14 is three-way, not two. A dismissal to the
++    // tray icon ends the session; a minimise to the task bar and a loss of
++    // focus do not. `PanelVisibility.changes` says which of the three happened
++    // and nothing more — the policy is here, in the ring that owns AD-18.
++    //
++    // Before this, `changes` was a `Stream<bool>` and every `true` began a
++    // session: a user who typed into the panel, iconified it and restored it
++    // got their text replaced by the clipboard, and so did one whose panel took
++    // itself down on a focus loss (DW-30).
++
++    test('DW-30: a focus loss keeps the session — the panel comes back with '
++        'what the user typed, and the clipboard is not read', () async {
++      harness.clipboard.text = 'the clipboard the session was seeded from';
++      await harness.show();
++      harness.controller.editText('mine');
++
++      harness.panel.loseFocus();
++      await pumpEventQueue();
++      harness.clipboard.text = 'theirs';
++      await harness.show();
++
++      expect(harness.state.editorText, equals('mine'));
++      expect(
++        harness.clipboard.readCalls,
++        equals(1),
++        reason:
++            'the seed of the one session that began, and nothing since — a '
++            'second read is a session this return was not entitled to start',
++      );
++    });
++
++    test('DW-30: a task-bar minimise keeps the session — an iconify is not the '
++        'user saying they are done with the window', () async {
++      await harness.show();
++      harness.controller.editText('mine');
++
++      harness.panel.minimize();
++      await pumpEventQueue();
++      harness.clipboard.text = 'theirs';
++      harness.panel.restore();
++      await pumpEventQueue();
++
++      expect(harness.state.editorText, equals('mine'));
++      expect(harness.clipboard.readCalls, equals(1));
++    });
++
++    test('DW-31: the believed minimize/restore pair discards nothing — the '
++        'timing window DW-31 opened is not an AD-18 session', () async {
++      // The adapter reports that pair as `iconified` then `shown` whether or
++      // not a request of ours was outstanding when it arrived (DW-31), so at
++      // this ring the pair is exactly the row above and this one says so on
++      // purpose: the pair was DW-30's sharpest case, because with
++      // `setSkipTaskbar(true)` the hotkey is the only route back and the press
++      // used to read as a summon.
++      await harness.show();
++      harness.controller.editText('mine');
++
++      harness.panel.minimize();
++      await pumpEventQueue();
++      // The user presses the hotkey rather than waiting for a restore.
++      harness.clipboard.text = 'theirs';
++      await harness.show();
++
++      expect(harness.state.editorText, equals('mine'));
++    });
++
++    test('AD-18: a dismissal ends the session — the hotkey, the tray entry and '
++        'the close control all reach the panel this way', () async {
++      harness.clipboard.text = 'the first clipboard';
++      await harness.show();
++      harness.controller.editText('mine');
++
++      await harness.hide();
++      harness.clipboard.text = 'theirs';
++      await harness.show();
++
++      expect(harness.state.editorText, equals('theirs'));
++      expect(harness.state.status, equals(CorrectionStatus.idle));
++      expect(harness.state.suggestionTexts, isEmpty);
++    });
++
++    test('AD-18: the first summon of the daemon\'s life begins a session, with '
++        'no departure behind it', () async {
++      harness.clipboard.text = 'the clipboard at startup';
++
++      await harness.show();
++
++      expect(
++        harness.state.editorText,
++        equals('the clipboard at startup'),
++        reason:
++            'the remembered departure starts at a dismissal, which is what '
++            'makes the first summon a session without a special case for it',
++      );
++    });
++
++    test('DW-30: the suggestions survive a focus loss, and a dismissal clears '
++        'them (CAP-5, CAP-13)', () async {
++      await harness.show();
++      harness.controller.submit();
++      harness.run.emit(_completed('formal one', 'casual one', 'shorter one'));
++      await pumpEventQueue();
++      expect(harness.state.suggestionTexts, isNotEmpty);
++
++      harness.panel.loseFocus();
++      await pumpEventQueue();
++      await harness.show();
++
++      expect(
++        harness.state.suggestionTexts,
++        isNotEmpty,
++        reason:
++            'a correction the user can still copy is not something a click-away '
++            'asked to be rid of',
++      );
++      expect(harness.state.status, equals(CorrectionStatus.completed));
++
++      await harness.hide();
++      await harness.show();
++
++      expect(
++        harness.state.suggestionTexts,
++        isEmpty,
++        reason: 'and a dismissal is the request that does ask',
++      );
++    });
++
++    test('DW-30: a return that begins no session emits nothing at all — the '
++        'panel is not told anything happened', () async {
++      await harness.show();
++      final states = <CorrectionState>[];
++      final subscription = harness.controller.changes.listen(states.add);
++
++      harness.panel.loseFocus();
++      await pumpEventQueue();
++      await harness.show();
++      harness.panel.minimize();
++      await pumpEventQueue();
++      harness.panel.restore();
++      await pumpEventQueue();
++
++      expect(
++        states,
++        isEmpty,
++        reason:
++            'no session began and nothing in the state moved, so there is '
++            'nothing for either consumer to act on',
++      );
++      await subscription.cancel();
++    });
++
++    test('DW-54: the state a session begins with is marked, and nothing built '
++        'from it is', () async {
++      final states = <CorrectionState>[];
++      final subscription = harness.controller.changes.listen(states.add);
++
++      await harness.show();
++
++      expect(states.first.isFreshSession, isTrue);
++      expect(
++        states.skip(1).map((state) => state.isFreshSession),
++        everyElement(isFalse),
++        reason:
++            'the clipboard seed is an update *within* the session it landed in',
++      );
++      await subscription.cancel();
++    });
++
++    test('DW-54: an editor the user clears by hand is not a session '
++        'beginning', () async {
++      harness.clipboard.text = 'the clipboard seed';
++      await harness.show();
++      final states = <CorrectionState>[];
++      final subscription = harness.controller.changes.listen(states.add);
++
++      // Select all, delete. An idle session with no suggestions and an empty
++      // editor: the exact value `CorrectionState.empty` used to be compared to.
++      harness.controller.editText('');
++      await pumpEventQueue();
++
++      expect(
++        states.single.isFreshSession,
++        isFalse,
++        reason:
++            'a keystroke is not a summon, and the two consumers act once per '
++            'session beginning (DW-54)',
++      );
++      expect(states.single, isNot(equals(CorrectionState.empty)));
++      await subscription.cancel();
++    });
++  });
++
+   group('running a correction', () {
+     test('CAP-3: the correction runs on what the user edited, not the '
+         'clipboard seed', () async {
+@@ -1252,7 +1450,7 @@ void main() {
+     });
+ 
+     test('CAP-2: a visibility stream error leaves the controller live for the '
+-        'next show', () async {
++        'next show, and the departure it remembers intact', () async {
+       harness.panel.emitChangesError(StateError('the window event failed'));
+       await pumpEventQueue();
+       expect(harness.logger.lines.single.level, equals('error'));
+@@ -1261,6 +1459,25 @@ void main() {
+       await harness.show();
+ 
+       expect(harness.state.editorText, equals('seeded after the stream error'));
++
++      // And the error is not a departure either: an out-of-contract emission
++      // must not be mistaken for the panel going away, or the summon after one
++      // would discard the session the user is in the middle of (AD-18).
++      harness.controller.editText('typed after the error');
++      harness.panel.loseFocus();
++      await pumpEventQueue();
++      harness.panel.emitChangesError(StateError('and again on the way back'));
++      await pumpEventQueue();
++      harness.clipboard.text = 'a clipboard nobody should read';
++      await harness.show();
++
++      expect(
++        harness.state.editorText,
++        equals('typed after the error'),
++        reason:
++            'the last thing the stream *said* was a focus loss, and an error '
++            'in between says nothing about where the window is',
++      );
+     });
+ 
+     test('CAP-13: a rejected save leaves the inline failure and its Retry '
+@@ -2004,6 +2221,12 @@ final class _Harness {
+     await pumpEventQueue();
+   }
+ 
++  /// The adapter's focus-loss hide (CAP-14) — a departure the session survives.
++  Future<void> loseFocus() async {
++    panel.loseFocus();
++    await pumpEventQueue();
++  }
++
+   Future<void> dispose() async {
+     await controller.dispose();
+     panel.dispose();
+diff --git a/test/application/panel_controller_test.dart b/test/application/panel_controller_test.dart
+index 3809c8a..e611253 100644
+--- a/test/application/panel_controller_test.dart
++++ b/test/application/panel_controller_test.dart
+@@ -102,7 +102,7 @@ void main() {
+       // open-panel entry both do exactly that. A surface keyed off the transition
+       // therefore never learns it was summoned.
+       final requests = <void>[];
+-      final transitions = <bool>[];
++      final transitions = <PanelVisibilityState>[];
+       controller.showRequests.listen(requests.add);
+       final watching = visibility.changes.listen(transitions.add);
+       addTearDown(watching.cancel);
+@@ -121,7 +121,7 @@ void main() {
+       );
+       expect(
+         transitions,
+-        equals([true]),
++        equals([PanelVisibilityState.shown]),
+         reason:
+             'and the visibility stream saw only the first, which is the whole '
+             'reason this one exists',
+@@ -430,7 +430,8 @@ final class _SynchronouslyThrowingVisibility implements PanelVisibility {
+   bool get isVisible => false;
+ 
+   @override
+-  Stream<bool> get changes => const Stream<bool>.empty();
++  Stream<PanelVisibilityState> get changes =>
++      const Stream<PanelVisibilityState>.empty();
+ 
+   @override
+   Future<void> show() => throw StateError('the window manager refused');
+diff --git a/test/application/state_equality_test.dart b/test/application/state_equality_test.dart
+index cebfbc4..f81495c 100644
+--- a/test/application/state_equality_test.dart
++++ b/test/application/state_equality_test.dart
+@@ -105,6 +105,51 @@ void main() {
+       );
+     });
+ 
++    test('DW-54: an idle state with a hand-cleared editor is not equal to '
++        'CorrectionState.empty — the session marker is part of the value', () {
++      // The whole of DW-54 at the state level. `isFreshSession` used to be
++      // `this == empty`, so the state a user produced by selecting all and
++      // deleting was indistinguishable from the state `_beginSession` emits —
++      // and both consumers acted on it: the panel pulled the caret back to the
++      // editor, and the daemon's home view returned to the panel view.
++      final handCleared = CorrectionState(
++        editorText: '',
++        status: CorrectionStatus.idle,
++        suggestionTexts: {},
++      );
++
++      expect(handCleared.isFreshSession, isFalse);
++      expect(handCleared, isNot(equals(CorrectionState.empty)));
++      expect(
++        CorrectionState.empty.isFreshSession,
++        isTrue,
++        reason: 'and the one state a session begins with still says so',
++      );
++    });
++
++    test('DW-54: copyWith never carries the session marker — a state built '
++        'from a session beginning is not one', () {
++      final seeded = CorrectionState.empty.copyWith(
++        editorText: 'the clipboard seed',
++      );
++
++      expect(seeded.isFreshSession, isFalse);
++      expect(
++        CorrectionState.empty.copyWith().isFreshSession,
++        isFalse,
++        reason:
++            'not even a copyWith that changes nothing: the marker belongs to '
++            'the emission, not to the shape of the value',
++      );
++      expect(
++        CorrectionState.empty.copyWith(),
++        isNot(equals(CorrectionState.empty)),
++        reason:
++            'which is only observable because the marker takes part in == — '
++            'without that, a copy of empty would keep reading as a summon',
++      );
++    });
++
+     test('CAP-5: Stream.distinct() collapses two successive equal correction '
+         'states into one event', () async {
+       final events = await Stream<CorrectionState>.fromIterable([
+diff --git a/test/fakes/fake_panel_visibility.dart b/test/fakes/fake_panel_visibility.dart
+index 5e7c515..5d91dfb 100644
+--- a/test/fakes/fake_panel_visibility.dart
++++ b/test/fakes/fake_panel_visibility.dart
+@@ -10,7 +10,8 @@ final class FakePanelVisibility implements PanelVisibility {
+   /// Broadcast: `changes` is a state-change notification stream that may
+   /// have multiple independent listeners. (The port declaration is AD-8
+   /// verbatim, so the flavor is documented here on the fake.)
+-  final StreamController<bool> _changes = StreamController<bool>.broadcast();
++  final StreamController<PanelVisibilityState> _changes =
++      StreamController<PanelVisibilityState>.broadcast();
+ 
+   /// When set, [show] rejects and visibility does not change — the window
+   /// manager refusing to map the window.
+@@ -38,8 +39,11 @@ final class FakePanelVisibility implements PanelVisibility {
+   }
+ 
+   @override
+-  Stream<bool> get changes =>
+-      CancelFailingStream<bool>(_changes.stream, () => cancelError);
++  Stream<PanelVisibilityState> get changes =>
++      CancelFailingStream<PanelVisibilityState>(
++        _changes.stream,
++        () => cancelError,
++      );
+ 
+   @override
+   Future<void> show() async {
+@@ -47,7 +51,7 @@ final class FakePanelVisibility implements PanelVisibility {
+     if (error != null) {
+       throw error;
+     }
+-    _setVisible(true);
++    _emit(PanelVisibilityState.shown);
+   }
+ 
+   @override
+@@ -56,22 +60,44 @@ final class FakePanelVisibility implements PanelVisibility {
+     if (error != null) {
+       throw error;
+     }
+-    _setVisible(false);
++    _emit(PanelVisibilityState.dismissed);
+   }
+ 
+   /// Simulates the adapter's focus-loss hide (CAP-14).
+-  void loseFocus() => _setVisible(false);
++  ///
++  /// A departure the session survives, which is the whole reason this is a
++  /// separate member from [hide] rather than a second call to it.
++  void loseFocus() => _emit(PanelVisibilityState.focusLost);
++
++  /// Simulates the window being iconified — a task-bar minimise, a workspace
++  /// switch, a show-desktop gesture.
++  ///
++  /// The other departure a session survives. Paired with [restore] because an
++  /// iconify is the one departure with a return route of its own: without it a
++  /// test can only bring the panel back with [show], which is the *same* signal
++  /// but reached by a different gesture.
++  void minimize() => _emit(PanelVisibilityState.iconified);
++
++  /// Simulates the window being de-iconified by the window manager.
++  ///
++  /// Reports [PanelVisibilityState.shown], exactly as [show] does: the port
++  /// names where the window is, and a restored panel and a summoned one are in
++  /// the same place.
++  void restore() => _emit(PanelVisibilityState.shown);
+ 
+   /// Pushes an error onto [changes] — an adapter breaking the port's promise
+-  /// of a plain bool stream.
++  /// of a plain stream of [PanelVisibilityState].
+   void emitChangesError(Object error) => _changes.addError(error);
+ 
+-  void _setVisible(bool visible) {
+-    if (_visible == visible) {
++  /// Emits [state] only when it moves the panel, which is the transition-only
++  /// contract the port states: a `show()` at a visible panel and a `hide()` at a
++  /// hidden one report nothing, and two departures in a row cannot both emit.
++  void _emit(PanelVisibilityState state) {
++    if (_visible == state.isVisible) {
+       return;
+     }
+-    _visible = visible;
+-    _changes.add(visible);
++    _visible = state.isVisible;
++    _changes.add(state);
+   }
+ 
+   /// Closes the changes stream. Test teardown only — not part of the port.
+diff --git a/test/infrastructure/panel/panel_visibility_broadcast_test.dart b/test/infrastructure/panel/panel_visibility_broadcast_test.dart
+index 3eafd9c..ae63108 100644
+--- a/test/infrastructure/panel/panel_visibility_broadcast_test.dart
++++ b/test/infrastructure/panel/panel_visibility_broadcast_test.dart
+@@ -1,3 +1,4 @@
++import 'package:hotkey_grammar_corrector/src/domain/panel/panel_visibility.dart';
+ import 'package:hotkey_grammar_corrector/src/infrastructure/panel/window_manager_panel_visibility.dart';
+ import 'package:test/test.dart';
+ 
+@@ -40,8 +41,8 @@ void main() {
+ 
+   test('CAP-2: two independent consumers each receive every transition, and '
+       'neither subscription throws', () async {
+-    final panel = <bool>[];
+-    final correction = <bool>[];
++    final panel = <PanelVisibilityState>[];
++    final correction = <PanelVisibilityState>[];
+ 
+     visibility.changes.listen(panel.add);
+     expect(() => visibility.changes.listen(correction.add), returnsNormally);
+@@ -54,8 +55,11 @@ void main() {
+     await hiding;
+     await pumpEventQueue();
+ 
+-    expect(panel, [true, false]);
+-    expect(correction, [true, false]);
++    expect(panel, [PanelVisibilityState.shown, PanelVisibilityState.dismissed]);
++    expect(correction, [
++      PanelVisibilityState.shown,
++      PanelVisibilityState.dismissed,
++    ]);
+   });
+ 
+   test('AD-8: a listener attached after a transition receives only what '
+@@ -65,7 +69,7 @@ void main() {
+     await showing;
+     await pumpEventQueue();
+ 
+-    final late = <bool>[];
++    final late = <PanelVisibilityState>[];
+     visibility.changes.listen(late.add);
+     await pumpEventQueue();
+ 
+@@ -83,6 +87,6 @@ void main() {
+     await hiding;
+     await pumpEventQueue();
+ 
+-    expect(late, [false]);
++    expect(late, [PanelVisibilityState.dismissed]);
+   });
+ }
+diff --git a/test/infrastructure/panel/window_manager_panel_visibility_test.dart b/test/infrastructure/panel/window_manager_panel_visibility_test.dart
+index 6363416..c6983fa 100644
+--- a/test/infrastructure/panel/window_manager_panel_visibility_test.dart
++++ b/test/infrastructure/panel/window_manager_panel_visibility_test.dart
+@@ -1,6 +1,7 @@
+ import 'dart:async';
+ 
+ import 'package:hotkey_grammar_corrector/src/application/panel_controller.dart';
++import 'package:hotkey_grammar_corrector/src/domain/panel/panel_visibility.dart';
+ import 'package:hotkey_grammar_corrector/src/infrastructure/panel/window_manager_panel_visibility.dart';
+ import 'package:test/test.dart';
+ 
+@@ -9,6 +10,14 @@ import '../../fakes/fake_logger.dart';
+ import '../../fakes/fake_panel_window.dart';
+ import '../../fakes/throwing_logger.dart';
+ 
++/// The departures, named short because every emission list in this file is read
++/// as a sentence: `expect(emitted, [shown, iconified, shown])` is the claim, and
++/// the enum's own name repeated four times to a row buries it.
++const PanelVisibilityState shown = PanelVisibilityState.shown;
++const PanelVisibilityState dismissed = PanelVisibilityState.dismissed;
++const PanelVisibilityState iconified = PanelVisibilityState.iconified;
++const PanelVisibilityState focusLost = PanelVisibilityState.focusLost;
++
+ /// The bound for every row where the bound is **not** what is under test.
+ ///
+ /// Deliberately unreachable rather than merely generous. Most rows here park a
+@@ -34,15 +43,21 @@ const Duration _stallBound = Duration(seconds: 1);
+ /// correct mirror over a panel that was still on screen, and a suite that
+ /// asserted only the mirror certified it green.
+ ///
+-/// **Negative controls.** Twenty-six mutations of
++/// **Negative controls.** Twenty-seven mutations of
+ /// `window_manager_panel_visibility.dart` were applied to this tree, this file
+ /// re-run against each, and each reverted **from a copy** rather than with
+ /// `git checkout --`, which would have discarded the work under review along
+ /// with the mutation. Each is stated as the exact edit, and every count is
+-/// failures *in this file* over a baseline confirmed green first — 70 rows, all
++/// failures *in this file* over a baseline confirmed green first — 77 rows, all
+ /// passing — because a count no one can reproduce is not evidence, and a run
+ /// whose baseline was never checked reports the same number for every gate.
+ ///
++/// One reading note, because DW-30 moved a body without moving a behaviour:
++/// `hide()` is now a one-line delegation to
++/// `_hide(PanelVisibilityState.dismissed)`, so every entry below that names a
++/// line "in `hide()`" means that line in `_hide` — the departure is the only
++/// thing the two routes into it disagree about.
++///
+ /// **How the zero counts were taken, and why that needed saying.** A "0" from
+ /// this harness and a stale build are indistinguishable from the outside, and
+ /// one entry here was previously wrong in its *reasoning* as well as its count
+@@ -235,6 +250,15 @@ const Duration _stallBound = Duration(seconds: 1);
+ ///    only if concurrent `_apply` runs are ever allowed, which is what the
+ ///    comment at the site says. Exhibit two `_apply` runs overlapping and this
+ ///    reason is wrong.
++/// 27. both focus-loss `_dismiss` calls changed to pass
++///    `PanelVisibilityState.dismissed` instead of
++///    `PanelVisibilityState.focusLost`, so CAP-14's own hide reports the
++///    departure a *requested* hide reports (DW-30) — 5 failures: the two
++///    attribution rows for the immediate and the latched route, and the three
++///    older CAP-14/DW-32 rows whose emission lists now name the departure. The
++///    mutation moves no mirror and no window call, so before the emissions were
++///    typed it failed **zero** while the summon after every click-away
++///    discarded whatever the user had typed.
+ ///
+ /// 9 and 11 are deliberately pinned by rows that fail for one of them and not
+ /// the other — the trailing-focus row never delivers a `focus` while the panel
+@@ -318,9 +342,9 @@ void main() {
+       expect(window.calls, ['show', 'focus', 'hide']);
+     });
+ 
+-    test('AD-18: changes emits once per transition, and nothing for a hide '
+-        'that changes nothing', () async {
+-      final emitted = <bool>[];
++    test('AD-18: changes emits once per transition, naming the departure, and '
++        'nothing for a hide that changes nothing', () async {
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       await _settled(visibility.hide(), window);
+@@ -331,11 +355,12 @@ void main() {
+ 
+       expect(
+         emitted,
+-        [true, false],
++        [shown, dismissed],
+         reason:
+-            'CorrectionController starts a fresh session on every true '
+-            '(AD-18), so a duplicate emission is a duplicate clipboard read '
+-            'and a discarded editor',
++            'a requested hide is the user saying they are done, so it reports '
++            'dismissed — and CorrectionController begins a session on the '
++            'shown after one (AD-18), which makes a duplicate emission here a '
++            'duplicate clipboard read and a discarded editor',
+       );
+     });
+ 
+@@ -524,7 +549,7 @@ void main() {
+ 
+     test('AD-8: the show echo of a superseded request does not resurrect the '
+         'panel', () async {
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       // Press one gets as far as issuing `show`.
+@@ -541,8 +566,9 @@ void main() {
+         isFalse,
+         reason:
+             'the echo belongs to a request the user has already superseded; '
+-            'believing it emits a spurious true, which under AD-18 clears the '
+-            'editor and re-reads the clipboard against a panel on its way out',
++            'believing it emits a spurious shown behind the dismissal, which '
++            'under AD-18 clears the editor and re-reads the clipboard against '
++            'a panel on its way out',
+       );
+ 
+       await window.settle();
+@@ -552,26 +578,26 @@ void main() {
+ 
+       expect(window.visible, isFalse);
+       expect(window.visible, visibility.isVisible);
+-      expect(emitted, [true, false]);
++      expect(emitted, [shown, dismissed]);
+     });
+   });
+ 
+   group('window events move the mirror only on their own (AD-8)', () {
+     test('AD-8: our own show echo reports no second transition', () async {
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       await _settled(visibility.show(), window);
+       await pumpEventQueue();
+ 
+-      expect(emitted, [true]);
++      expect(emitted, [shown]);
+       expect(window.visible, visibility.isVisible);
+     });
+ 
+     test(
+       'AD-8: a hide the window manager performed itself moves the mirror',
+       () async {
+-        final emitted = <bool>[];
++        final emitted = <PanelVisibilityState>[];
+         visibility.changes.listen(emitted.add);
+         await _settled(visibility.show(), window);
+ 
+@@ -580,7 +606,7 @@ void main() {
+         await pumpEventQueue();
+ 
+         expect(visibility.isVisible, isFalse);
+-        expect(emitted, [true, false]);
++        expect(emitted, [shown, dismissed]);
+       },
+     );
+ 
+@@ -625,7 +651,7 @@ void main() {
+       // to click the panel back from: the hotkey is the only way to reach it,
+       // and with the mirror still reading `true` that press was spent hiding a
+       // window nobody could see.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
+@@ -642,7 +668,7 @@ void main() {
+         isFalse,
+         reason: 'an iconified panel is not up, whoever asked for the iconify',
+       );
+-      expect(emitted, [true, false]);
++      expect(emitted, [shown, iconified]);
+ 
+       await window.settle();
+       await showing;
+@@ -689,12 +715,14 @@ void main() {
+       // flag DW-31 was opened for — `_setMirror(false)` also clears the
+       // keyboard flag, so CAP-14 died for that panel's life, and with
+       // `setSkipTaskbar(true)` the hotkey is the only route back, which against
+-      // a false mirror reads as a summon and discards the user's typed text.
++      // a false mirror resolves to `show()`: the panel is already up, so the
++      // press changes nothing the user can see and nothing can put the window
++      // away again.
+       //
+       // A believed `minimize` therefore arms a one-shot latch and the next
+       // `restore` consumes it, moving the mirror back without consulting the
+       // guard.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+       window.emitEvent('focus');
+@@ -749,12 +777,13 @@ void main() {
+       );
+       expect(
+         emitted,
+-        [true, false, true],
++        [shown, iconified, shown],
+         reason:
+-            'the summon, then the pair — one value each way and no third. A '
+-            'guarded restore would have stopped at false, and every later '
+-            'press would then have read as a summon (AD-18) against a panel '
+-            'that never left the screen',
++            'the summon, then the pair — one value each way and no third, and '
++            'the pair is named iconified so no session is discarded across it. '
++            'A guarded restore would have stopped at the iconified, leaving a '
++            'mirror reading false over a mapped window that no later press '
++            'could put away',
+       );
+     });
+ 
+@@ -768,7 +797,7 @@ void main() {
+       // could never re-arm it over a mirror stuck at false. With the mirror back
+       // up, the deiconify's real focus-in is recorded and CAP-14 outlives the
+       // pair.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+       window.emitEvent('focus');
+@@ -805,7 +834,7 @@ void main() {
+       );
+       expect(window.visible, isFalse);
+       expect(window.visible, visibility.isVisible);
+-      expect(emitted, [true, false, true, false]);
++      expect(emitted, [shown, iconified, shown, focusLost]);
+     });
+ 
+     test('DW-31: a second restore on a spent latch is swallowed by the guard — '
+@@ -821,7 +850,7 @@ void main() {
+       // is allowed to mean; recorded here rather than left to be discovered,
+       // like the other guards this suite's negative-control block says fail
+       // nothing.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
+@@ -845,7 +874,7 @@ void main() {
+       expect(window.visible, visibility.isVisible);
+       expect(
+         emitted,
+-        [true, false, true],
++        [shown, iconified, shown],
+         reason: 'the second restore undoes nothing, so it reports nothing',
+       );
+     });
+@@ -862,7 +891,7 @@ void main() {
+       // As with the row above, both arms produce the same mirror value here, so
+       // this row pins the outcome. The row below is the one that fails when the
+       // latch is not cleared where the intent is expressed.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
+@@ -884,10 +913,12 @@ void main() {
+       expect(window.visible, visibility.isVisible);
+       expect(
+         emitted,
+-        [true, false, true],
++        [shown, iconified, shown],
+         reason:
+-            'the press is one transition; its own echo is not a second one, or '
+-            'every summon of an iconified panel would start two AD-18 sessions',
++            'the press is one transition and its own echo is not a second one. '
++            'Both read shown, so a duplicate would cost nothing here under '
++            'AD-18 — what it would cost is the transition-only contract the '
++            'port states, which everything above reads',
+       );
+     });
+ 
+@@ -943,7 +974,7 @@ void main() {
+       // coverage exists to prevent. `_setMirror` cannot carry this on its own:
+       // it early-returns when the value does not change, and a `show()` at an
+       // already-visible panel writes nothing at all.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
+@@ -982,7 +1013,7 @@ void main() {
+       );
+       expect(window.visible, isFalse);
+       expect(window.visible, visibility.isVisible);
+-      expect(emitted, [true, false, true, false]);
++      expect(emitted, [shown, iconified, shown, dismissed]);
+     });
+ 
+     test('DW-31: a close while a believed minimize stands still leaves the '
+@@ -997,7 +1028,7 @@ void main() {
+       // back to true over a window that is on its way down, and the panel the
+       // user explicitly closed reads as up: the next press is spent hiding a
+       // window that has already gone.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
+@@ -1027,7 +1058,7 @@ void main() {
+       expect(window.calls, ['show', 'focus', 'hide']);
+       expect(window.visible, isFalse);
+       expect(window.visible, visibility.isVisible);
+-      expect(emitted, [true, false]);
++      expect(emitted, [shown, iconified]);
+     });
+ 
+     test('DW-31: a minimize that moved no mirror arms nothing — our own hide '
+@@ -1054,7 +1085,7 @@ void main() {
+       // this suite's usual `window.visible == visibility.isVisible` pairing
+       // cannot see it. What separates the two trees is the mirror's *value* and
+       // the absence of the queued `hide` from the platform calls.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+       window.emitEvent('focus');
+@@ -1094,10 +1125,10 @@ void main() {
+       expect(window.visible, visibility.isVisible);
+       expect(
+         emitted,
+-        [true, false],
++        [shown, dismissed],
+         reason:
+             'and no third transition — a believed pair here would report the '
+-            'panel back up and start a fresh AD-18 session for it',
++            'panel back up over a hide the user is still waiting for',
+       );
+     });
+ 
+@@ -1118,7 +1149,7 @@ void main() {
+       // rather than establishing it; the flag itself is pinned in
+       // `test/architecture/`, and the real close control is owed on a session
+       // (see `test/platform/panel_visibility_live_test.dart`).
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
+@@ -1143,7 +1174,7 @@ void main() {
+       );
+       expect(window.visible, isFalse);
+       expect(window.visible, visibility.isVisible);
+-      expect(emitted, [true, false]);
++      expect(emitted, [shown, dismissed]);
+     });
+ 
+     test('DW-12: a close arriving while a request of ours is outstanding is '
+@@ -1160,7 +1191,7 @@ void main() {
+       // leaves the whole suite green while a close landing during the map it
+       // interrupts is silently dropped: the panel stays on screen and the user
+       // has to ask twice.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       // The show is parked at the window, so `_outstanding` is up — the state
+@@ -1193,7 +1224,7 @@ void main() {
+       );
+       expect(window.visible, isFalse);
+       expect(window.visible, visibility.isVisible);
+-      expect(emitted, [true, false]);
++      expect(emitted, [shown, dismissed]);
+     });
+ 
+     test('DW-12: a close is obeyed even when the mirror already reads hidden — '
+@@ -1405,7 +1436,7 @@ void main() {
+       // focus-out only when a focus-in said the window ever held the keyboard.
+       // Deleting that requirement is a mutation the DW-33 row below catches;
+       // deleting the *dismissal* is what this row catches.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
+@@ -1422,7 +1453,7 @@ void main() {
+ 
+       expect(window.visible, isFalse);
+       expect(window.visible, visibility.isVisible);
+-      expect(emitted, [true, false]);
++      expect(emitted, [shown, focusLost]);
+     });
+ 
+     test('DW-33: a blur at a panel the window manager never gave the keyboard '
+@@ -1437,7 +1468,7 @@ void main() {
+       // This row is the first of the two questions the arm now asks, and the
+       // one the CAP-14 row above deliberately does not exercise — that row
+       // delivers a `focus` first.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
+@@ -1457,7 +1488,7 @@ void main() {
+         isTrue,
+         reason: 'and the panel the user just asked for is still on screen',
+       );
+-      expect(emitted, [true]);
++      expect(emitted, [shown]);
+     });
+ 
+     test('DW-33: a focus arriving at a panel that is already gone is not '
+@@ -1488,7 +1519,7 @@ void main() {
+       window.emitEvent('focus');
+       await pumpEventQueue();
+ 
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
+@@ -1505,7 +1536,7 @@ void main() {
+             'flag left behind by the one before it',
+       );
+       expect(window.visible, isTrue);
+-      expect(emitted, [true]);
++      expect(emitted, [shown]);
+     });
+ 
+     test('DW-33: the mirror going false on a route with no blur still clears '
+@@ -1525,7 +1556,7 @@ void main() {
+       // before it was iconified. It must not — the row above covers the other
+       // half, a focus arriving while the mirror is false, and neither row
+       // fails for the other's deletion.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
+@@ -1553,7 +1584,7 @@ void main() {
+             'of its own before a focus-out means anything',
+       );
+       expect(window.calls, isNot(contains('hide')));
+-      expect(emitted, [true, false, true]);
++      expect(emitted, [shown, iconified, shown]);
+     });
+ 
+     test('CAP-14: a blur while the panel is hidden does nothing — the other '
+@@ -1571,7 +1602,7 @@ void main() {
+       // implies `_visible`. Deleting `!_visible ||` from `_onBlur` leaves this
+       // file green; it is recorded as control 12 rather than fixed, since the
+       // clause states a real precondition and costs nothing.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       window.emitEvent('focus');
+@@ -1620,7 +1651,7 @@ void main() {
+       // window, and the user really can click away during it. Returning early
+       // on `_outstanding` discarded that dismissal and nothing ever re-asked,
+       // so the panel stayed on screen until the next press.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+       window.emitEvent('focus');
+@@ -1658,7 +1689,7 @@ void main() {
+       );
+       expect(window.visible, isFalse);
+       expect(window.visible, visibility.isVisible);
+-      expect(emitted, [true, false]);
++      expect(emitted, [shown, focusLost]);
+     });
+ 
+     test('DW-32: two blurs inside one round trip are one dismissal — the '
+@@ -1706,7 +1737,7 @@ void main() {
+       // blur ends in `focus()`, which is `gtk_window_present`: it takes the
+       // keyboard back and the window says so. Dismissing on the blur that
+       // preceded that would take down a panel the compositor has just focused.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+       window.emitEvent('focus');
+@@ -1731,7 +1762,7 @@ void main() {
+         reason: 'there is no dismissal left to perform',
+       );
+       expect(window.visible, isTrue);
+-      expect(emitted, [true]);
++      expect(emitted, [shown]);
+     });
+ 
+     test('DW-32: a latched blur whose panel is dismissed first adds no second '
+@@ -1794,7 +1825,7 @@ void main() {
+       // behind it reads as superseded and issues nothing. The panel does not
+       // flicker — it never appears, and no further event is coming to explain
+       // it. Both presses are spent and the user is looking at nothing.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+       window.emitEvent('focus');
+@@ -1841,7 +1872,7 @@ void main() {
+       expect(window.visible, visibility.isVisible);
+       expect(
+         emitted,
+-        [true],
++        [shown],
+         reason:
+             'and the panel never left, so no AD-18 session was discarded on '
+             'the way',
+@@ -1863,7 +1894,7 @@ void main() {
+       // Clearing the latch on every transition is what answers that, and it
+       // subsumes the mechanism of the dismissed-first row above; that row is
+       // kept because it pins the outcome from the other direction.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+       window.emitEvent('focus');
+@@ -1901,7 +1932,7 @@ void main() {
+             'other face',
+       );
+       expect(window.visible, visibility.isVisible);
+-      expect(emitted, [true, false, true]);
++      expect(emitted, [shown, dismissed, shown]);
+     });
+ 
+     test('DW-32: a minimize during a latched round trip voids the blur — the '
+@@ -1918,7 +1949,7 @@ void main() {
+       // `hide()` is involved in, so the latch survives into the release point
+       // if that clear is gone, and issues a hide from there if the re-read is
+       // gone too.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+       window.emitEvent('focus');
+@@ -1951,7 +1982,7 @@ void main() {
+             'panel the minimize took away, and a hide issued for it now would '
+             'unmap a window the user cannot see anyway',
+       );
+-      expect(emitted, [true, false]);
++      expect(emitted, [shown, iconified]);
+     });
+ 
+     test('AD-8: a latched blur outliving dispose() moves no window — a '
+@@ -2038,6 +2069,183 @@ void main() {
+     });
+   });
+ 
++  group('DW-30: every departure is named where the mirror moves', () {
++    // The whole attribution table in one place, one row per site that can move
++    // the mirror down, plus the return route the pair has.
++    //
++    // Deliberately separate from the mechanism rows above, which assert the
++    // *mirror* and the window agreeing and read the emission as a side claim.
++    // These rows assert only the label, because the label is now a contract of
++    // its own: `CorrectionController` reads it to decide whether a session ends
++    // (AD-18), so a site that names its departure wrongly discards the user's
++    // typed text or keeps text they asked to be rid of, with the mirror and the
++    // window both perfectly correct throughout.
++    //
++    // The human's rule is three-way, not two: `dismissed` ends a session,
++    // `iconified` and `focusLost` do not.
++
++    test('DW-30: a requested hide reports dismissed — the hotkey toggle, the '
++        'tray entry and AD-12 all put the panel away this way', () async {
++      final emitted = <PanelVisibilityState>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++
++      await _settled(visibility.hide(), window);
++
++      expect(
++        emitted,
++        [shown, dismissed],
++        reason: 'the user asked for the window to go away, so the session ends',
++      );
++    });
++
++    test('DW-30: an external hide event reports dismissed — the panel is where '
++        'a request of ours would have put it', () async {
++      final emitted = <PanelVisibilityState>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++
++      // The window manager unmapped the panel with nothing of ours outstanding.
++      window.emitEvent('hide');
++      await pumpEventQueue();
++
++      expect(
++        emitted,
++        [shown, dismissed],
++        reason:
++            'nothing distinguishes this state from a requested hide, and the '
++            'status quo for it is the dismissal — not a new reading',
++      );
++    });
++
++    test('DW-30: the close arm reports dismissed, and its log line stays its '
++        'own — the cause and the departure are two facts', () async {
++      final emitted = <PanelVisibilityState>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++      window.hideError = StateError('the window manager refused to unmap');
++
++      window.emitEvent('close');
++      await pumpEventQueue();
++      await window.settle();
++      await pumpEventQueue();
++
++      expect(
++        emitted,
++        [shown, dismissed],
++        reason:
++            'a close is the user dismissing the window, so it takes the same '
++            'half of the rule a hide() request takes',
++      );
++      expect(
++        logger.lines.single.message,
++        contains('close hide'),
++        reason:
++            "and the operator's vocabulary is untouched by the session's: this "
++            'refusal is still the close one, not a focus-loss one',
++      );
++    });
++
++    test('DW-30: the immediate focus-loss hide reports focusLost — CAP-14 '
++        'dismissed the window, not the work in it', () async {
++      final emitted = <PanelVisibilityState>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      window.emitEvent('blur');
++      await pumpEventQueue();
++      await window.settle();
++      await pumpEventQueue();
++
++      expect(
++        emitted,
++        [shown, focusLost],
++        reason:
++            'the user clicked away; they did not ask for what they had typed '
++            'to be thrown away, so the session survives the return',
++      );
++    });
++
++    test('DW-30: a latched focus-loss hide reports focusLost too — one round '
++        'trip later is still a focus loss', () async {
++      final emitted = <PanelVisibilityState>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      // AD-14's second launch, parked at the window: the blur is latched rather
++      // than obeyed, and reconsidered when the chain lets go (DW-32).
++      final showing = visibility.show();
++      await pumpEventQueue();
++      window.emitEvent('blur');
++      await pumpEventQueue();
++
++      await window.settle();
++      await showing;
++      await pumpEventQueue();
++
++      expect(
++        emitted,
++        [shown, focusLost],
++        reason:
++            'the deferred route is the same cause reaching the window a round '
++            'trip late, so it cannot end a session the immediate one keeps',
++      );
++    });
++
++    test('DW-30: a minimize reports iconified — the user did not ask to be '
++        'done with the window', () async {
++      final emitted = <PanelVisibilityState>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++
++      window.emitEvent('minimize');
++      await pumpEventQueue();
++
++      expect(
++        emitted,
++        [shown, iconified],
++        reason:
++            'a workspace switch or a show-desktop gesture hands back the same '
++            'window with the same text in it, and the press that brings it '
++            'back must not discard that text (DW-30)',
++      );
++    });
++
++    test('DW-30: the latched restore reports shown, so a believed pair costs '
++        'no session at all — the DW-31 pair is where DW-30 bit hardest', () async {
++      final emitted = <PanelVisibilityState>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++
++      // The pair arrives inside one of our requests, which is the interleaving
++      // DW-31's latch exists for: the minimize is believed and the restore
++      // undoing it walks past the guard.
++      final showing = visibility.show();
++      await pumpEventQueue();
++      window.emitEvent('minimize');
++      await pumpEventQueue();
++      window.emitEvent('restore');
++      await pumpEventQueue();
++
++      await window.settle();
++      await showing;
++      await pumpEventQueue();
++
++      expect(
++        emitted,
++        [shown, iconified, shown],
++        reason:
++            'a restored panel and a summoned one are in the same place, so the '
++            'return is plain shown — and because the departure before it was '
++            'an iconify, no session begins and the editor survives the pair',
++      );
++    });
++  });
++
+   group('teardown (CAP-7)', () {
+     test('AD-8: a disposed adapter closes changes and deregisters from the '
+         'window', () async {
+@@ -2162,7 +2370,7 @@ void main() {
+ 
+     test('DW-28: a hide that never answers is abandoned and named — the bound '
+         'is on every call, not only on the map', () async {
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       // The window manager mapped the panel itself, so the mirror is up without
+@@ -2192,7 +2400,7 @@ void main() {
+       expect(visibility.isVisible, isFalse);
+       expect(
+         emitted,
+-        [true, false],
++        [shown, dismissed],
+         reason:
+             'the map the window manager did, then the hide the mirror led '
+             'with — abandoning the call is not a third transition to report',
+@@ -2205,7 +2413,7 @@ void main() {
+       // bare `await _window.focus()` would leave unbounded: the map answers, so
+       // every row about a stalled *show* stays green while the chain parks on
+       // the focus behind it.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       final showing = visibility.show();
+@@ -2229,7 +2437,7 @@ void main() {
+       expect(window.visible, isTrue);
+       expect(
+         emitted,
+-        [true],
++        [shown],
+         reason:
+             'the mirror led at the call, and abandoning the trailing focus is '
+             'not a second transition to report',
+@@ -2254,7 +2462,7 @@ void main() {
+       // did map, and is also the panel the user already dismissed coming back.
+       // Stated in the class doc as what mechanism four costs; pinned here so it
+       // is a decision rather than a surprise.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       await visibility.show();
+@@ -2289,11 +2497,13 @@ void main() {
+       );
+       expect(
+         emitted,
+-        [true, false, true],
++        [shown, dismissed, shown],
+         reason:
+-            'that third transition is a fresh CorrectionController session '
+-            '(AD-18): a duplicate clipboard read and a discarded editor, which '
+-            'is the price of a call that was abandoned rather than cancelled',
++            'a shown behind a dismissed is a fresh CorrectionController '
++            'session (AD-18): a duplicate clipboard read and a discarded '
++            'editor, which is the price of a call that was abandoned rather '
++            'than cancelled — and it is the rule applied correctly, because '
++            'the user did ask for that panel to go away',
+       );
+     });
+ 
+@@ -2305,7 +2515,7 @@ void main() {
+       // dismissed panel *and* takes the keyboard. Nothing pinned it — the
+       // focus stall row above parks the call and never releases it, so the
+       // landing was never posed.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       final showing = visibility.show();
+@@ -2342,7 +2552,7 @@ void main() {
+       expect(visibility.isVisible, isTrue);
+       expect(
+         emitted,
+-        [true, false, true],
++        [shown, dismissed, shown],
+         reason:
+             'the same duplicate AD-18 session the show arm costs, reached '
+             'through the other half of the same request',
+@@ -2352,10 +2562,11 @@ void main() {
+     test('DW-28: an abandoned hide landing after a completed show unmaps the '
+         'panel the user just asked for', () async {
+       // The mirror image, and the one that loses work rather than leaking it:
+-      // the stale unmap takes down a live panel, `_reconcile` follows it, and
+-      // because the next `true` re-seeds from the clipboard (AD-18) whatever
+-      // was typed into that window is discarded rather than restored.
+-      final emitted = <bool>[];
++      // the stale unmap takes down a live panel, `_reconcile` follows it and
++      // names it `dismissed` like any other unmap the window reports, so the
++      // next press re-seeds from the clipboard (AD-18) and whatever was typed
++      // into that window is discarded rather than restored.
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       final showing = visibility.show();
+@@ -2403,7 +2614,7 @@ void main() {
+             'any window-manager event — the mirror stays honest about the '
+             'window and the panel is simply gone',
+       );
+-      expect(emitted, [true, false, true, false]);
++      expect(emitted, [shown, dismissed, shown, dismissed]);
+     });
+ 
+     test('AD-15: a call that refuses *after* it was abandoned is absorbed — a '
+@@ -2446,7 +2657,7 @@ void main() {
+       // press must read it as shown and hide it. Nothing else here pins the
+       // mirror after an abandonment — writing the intent back on this branch
+       // leaves every other row in the group green.
+-      final emitted = <bool>[];
++      final emitted = <PanelVisibilityState>[];
+       visibility.changes.listen(emitted.add);
+ 
+       await visibility.show();
+@@ -2454,7 +2665,7 @@ void main() {
+       expect(visibility.isVisible, isTrue);
+       expect(
+         emitted,
+-        [true],
++        [shown],
+         reason:
+             'the mirror led at the call, and abandoning the call is not a '
+             'second transition to report',

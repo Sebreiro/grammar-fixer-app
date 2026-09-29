@@ -1,0 +1,68 @@
+name: hotkey_grammar_corrector
+description: 'Linux tray daemon that corrects clipboard text via a global hotkey.'
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+  flutter: '>=3.44.8'
+
+# The pub versions below match the architecture spine's Stack table,
+# reconciled to this manifest on 2026-09-26. No carets for package pins.
+#
+# The Stack table cites .github/workflows/ci.yml for the Flutter toolchain.
+# The `flutter:` floor above and .devcontainer/Dockerfile's FLUTTER_VERSION are
+# separate hand-maintained copies; their drift is tracked in the ledger.
+#
+# drift_flutter was removed when AppPaths took ownership of path resolution;
+# native sqlite now comes from sqlite3's Dart build hooks.
+#
+# hotkey_manager was removed because its plugin could not report a refused
+# grab and linked libkeybinder before startup. x11_key_grab_registrar.dart
+# now talks to libX11.so.6 through FFI.
+dependencies:
+  flutter:
+    sdk: flutter
+
+  dbus: 0.7.14
+  drift: 2.34.3
+  # Promoted, not added: already resolved at exactly this version as a
+  # transitive dependency, so the lock's sha256 for it does not move. Needed by
+  # x11_key_grab_registrar.dart for `calloc` and `Utf8` — `dart:ffi` has no
+  # allocator of its own.
+  ffi: 2.2.0
+  flutter_riverpod: 3.4.2
+  sqlite3: 3.5.1
+  tray_manager: 0.5.3
+  window_manager: 0.5.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # Direct so `dart test` can run pure-Dart domain tests without a Flutter
+  # binding (AGENTS.md §7); the spine Stack table records this pin.
+  test: 1.31.0
+
+  # Renegotiated down from the spine's original 2.16.0 / 2.34.5, which are
+  # unsatisfiable on the pinned Flutter stable (human-ratified 2026-08-06; the
+  # spine Stack table now lists these two). Note: 2.34.1 was never published;
+  # 2.34.0 is the newest drift_dev that resolves (2.34.1+1..2.34.4 all need
+  # analyzer ^13.0.0).
+  build_runner: 2.15.1
+  drift_dev: 2.34.0
+  flutter_lints: 6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    # The Python sidecar ships as a versioned asset (AD-19); the configured
+    # sidecar path points at the installed copy of this directory.
+    - assets/sidecar/
+
+    # AD-12's tray icons. `trayManager.setIcon` resolves its argument against
+    # `<executable dir>/data/flutter_assets`, so an undeclared file would put
+    # a path to nothing in front of the indicator: a broken icon and no error.
+    - assets/tray/

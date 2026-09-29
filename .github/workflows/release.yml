@@ -1,0 +1,83 @@
+name: Linux release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version increment for a new release (ignored for retry_tag)
+        required: true
+        type: choice
+        options: [major, minor, patch]
+      retry_tag:
+        description: Existing workflow-owned tag to rebuild and finish publishing
+        required: false
+        type: string
+
+concurrency:
+  group: linux-release
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INPUT_BUMP: ${{ inputs.bump }}
+      INPUT_RETRY_TAG: ${{ inputs.retry_tag }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@0ca7a949e71ae44c8e688a51c5e7e93b2c87e295 # v2.22.0
+        with:
+          flutter-version: 3.44.8
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: 0.9.17
+
+      - name: Install Linux packaging prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dbus file flatpak flatpak-builder libgtk-3-dev libsecret-1-dev libayatana-appindicator3-dev liblzma-dev python3 python3-pip xvfb xdotool
+          sudo flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install --system -y flathub org.gnome.Platform//50 org.gnome.Sdk//50
+
+      - name: Install checksum-pinned AppImage tools
+        run: |
+          curl -fL --retry 3 --output "$RUNNER_TEMP/linuxdeploy" https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          printf '%s  %s\n' 'c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d' "$RUNNER_TEMP/linuxdeploy" | sha256sum --check --status
+          curl -fL --retry 3 --output "$RUNNER_TEMP/appimage-runtime" https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+          printf '%s  %s\n' '2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d' "$RUNNER_TEMP/appimage-runtime" | sha256sum --check --status
+          chmod 755 "$RUNNER_TEMP/linuxdeploy"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          echo "LDAI_RUNTIME_FILE=$RUNNER_TEMP/appimage-runtime" >> "$GITHUB_ENV"
+
+      - name: Test, build, and verify
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/xdg-runtime"
+          XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime" dbus-run-session -- tool/run_linux_release.sh prepare
+
+      - name: Preserve verified packages for tag recovery
+        if: ${{ inputs.retry_tag == '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/hgc-release/assets/
+            ${{ runner.temp }}/hgc-release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish verified packages
+        run: XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime" dbus-run-session -- tool/run_linux_release.sh publish

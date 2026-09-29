@@ -61,6 +61,29 @@ def main() -> int:
     }
     events_dir = os.path.join(run_dir, "events")
     os.makedirs(events_dir, exist_ok=True)
+
+    # A story's own work may spawn a NESTED `claude` — e.g. the Claude Agent SDK
+    # sidecar this project ships, exercised by its live tests. That child runs in
+    # the project dir (so it loads these hooks) and inherits BMAD_LOOP_TASK_ID,
+    # so its Stop/SessionEnd arrive tagged as the DEV session's. The orchestrator
+    # reads them as the dev session finishing and tears the window down mid-story,
+    # which surfaces as a bogus `crashed` with the sidecar's token count.
+    # Bind each task to the first session_id it reports and drop the rest.
+    sid = event["session_id"]
+    if sid:
+        bind = os.path.join(events_dir, f".session-{task_id}")
+        try:
+            with open(bind, "x", encoding="utf-8") as f:
+                f.write(sid)
+        except FileExistsError:
+            try:
+                with open(bind, encoding="utf-8") as f:
+                    owner = f.read().strip()
+            except OSError:
+                owner = ""
+            if owner and owner != sid:
+                return 0
+
     final = os.path.join(events_dir, f"{ts}-{task_id}-{event_name}.json")
     tmp = final + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

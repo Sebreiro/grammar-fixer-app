@@ -1,0 +1,18 @@
+# The app-id desktop entry (AD-11). This is not packaging polish: the Wayland
+# adapter registers the app id `com.divertedriver.HotkeyGrammarCorrector` with
+# the host portal registry, and GNOME discards the global-shortcut bind unless
+# an installed desktop entry carries that exact basename. Install it with
+# tool/install_desktop_entries.sh, which writes it to
+# ${XDG_DATA_HOME:-$HOME/.local/share}/applications/.
+#
+# Exec is the bare binary name so a checkout is installable without editing
+# this file; the installer's --exec flag rewrites it to the real path.
+[Desktop Entry]
+Type=Application
+Name=Hotkey Grammar Corrector
+Comment=Correct the text on your clipboard from anywhere with a global hotkey
+Exec=hotkey_grammar_corrector
+Icon=com.divertedriver.HotkeyGrammarCorrector
+Terminal=false
+Categories=Utility;
+StartupWMClass=com.divertedriver.HotkeyGrammarCorrector

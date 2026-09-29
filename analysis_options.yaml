@@ -1,0 +1,20 @@
+# Merge gate per AGENTS.md §6: a clean `dart analyze` is a merge requirement.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    # AGENTS.md §6 requires every future to be awaited or *visibly* discarded,
+    # and flutter_lints does not carry this rule. It fires only inside async
+    # bodies, so a dropped future in a synchronous handler still needs review.
+    - unawaited_futures
+
+# AD-1 (lib/src/domain/** imports only dart: libraries) has no analyzer-native
+# enforcement in Dart 3.12 — candidate options under `analyzer:` are rejected
+# as unsupported, and analyzer plugins would require a dependency outside the
+# spine's Stack table. The rule is enforced by
+# test/architecture/ad1_import_rule_test.dart, which runs under `dart test`.

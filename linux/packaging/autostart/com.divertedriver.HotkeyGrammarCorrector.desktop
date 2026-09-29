@@ -1,0 +1,20 @@
+# The autostart entry (AD-14). A resident tray daemon is only useful if it is
+# already running when the hotkey is pressed, so this starts it at login. It
+# lives in ${XDG_CONFIG_HOME:-$HOME/.config}/autostart/ — a different
+# destination from the app-id entry beside it, which AD-11 requires in
+# applications/. Both are installed by tool/install_desktop_entries.sh.
+#
+# Exec is deliberately identical to the app-id entry's: an autostarted daemon
+# and a later manual launch then run the same command, so the second one meets
+# AD-14's singleton lock, shows the panel of the instance already running, and
+# exits — rather than becoming a second daemon double-binding the hotkey.
+[Desktop Entry]
+Type=Application
+Name=Hotkey Grammar Corrector
+Comment=Start the grammar corrector daemon at login so its hotkey is live
+Exec=hotkey_grammar_corrector
+Icon=com.divertedriver.HotkeyGrammarCorrector
+Terminal=false
+Categories=Utility;
+StartupWMClass=com.divertedriver.HotkeyGrammarCorrector
+X-GNOME-Autostart-enabled=true

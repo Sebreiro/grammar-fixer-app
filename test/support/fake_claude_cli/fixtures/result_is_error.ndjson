@@ -1,0 +1,1 @@
+{"type": "result", "subtype": "error_during_execution", "duration_ms": 12, "duration_api_ms": 9, "is_error": true, "num_turns": 1, "session_id": "fake-session", "result": "the model refused"}

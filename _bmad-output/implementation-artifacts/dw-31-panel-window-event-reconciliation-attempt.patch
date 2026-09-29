@@ -1,0 +1,1527 @@
+diff --git a/lib/src/infrastructure/panel/panel_window.dart b/lib/src/infrastructure/panel/panel_window.dart
+index 6981dfa..e612653 100644
+--- a/lib/src/infrastructure/panel/panel_window.dart
++++ b/lib/src/infrastructure/panel/panel_window.dart
+@@ -12,11 +12,24 @@
+ /// mirror logic in `dart test`'s binding-free set (AGENTS.md §7) and confines
+ /// `window_manager` to one file (AD-1).
+ ///
+-/// [events] carries **raw window event names** — `show`, `hide`, `blur`,
+-/// `minimize`, `restore`, `close` — rather than a typed vocabulary, because the
+-/// one route `window_manager 0.5.2` offers to the two that matter most is
+-/// untyped (see `WindowManagerPanelWindow`). Translating them is the visibility
+-/// adapter's job.
++/// [events] carries **raw window event names** — `show`, `hide`, `focus`,
++/// `blur`, `minimize`, `restore`, `close` — rather than a typed vocabulary,
++/// because the one route `window_manager 0.5.2` offers to the two that matter
++/// most is untyped (see `WindowManagerPanelWindow`). Translating them is the
++/// visibility adapter's job.
++///
++/// `focus` is in that list because `WindowManagerPanelVisibility` cannot answer
++/// a `blur` without it (DW-33). A focus-out that follows a real focus-in is the
++/// user turning away, which CAP-14 answers with a hide; a focus-out at a window
++/// that never took the keyboard is a window manager with focus-stealing
++/// prevention declining to give it, and hiding there takes the panel down at
++/// the moment it was summoned. Only the pair distinguishes them, so a forwarder
++/// that dropped `focus` would leave every `blur` looking like the second case —
++/// a window that never took the keyboard — and **CAP-14's focus-loss dismissal
++/// would never fire again**. The panel would still be dismissable by the hotkey
++/// and by its close control (DW-12); it would simply stop putting itself away
++/// when the user clicked elsewhere, which is the one dismissal nobody asks for
++/// explicitly and so the one nobody would report as missing.
+ ///
+ /// `close` is in that list and is **load-bearing**, which is easy to miss
+ /// because it is the one name that does not describe a state the window has
+@@ -29,7 +42,8 @@
+ /// of this interface needs a Flutter binding. What catches that narrowing is
+ /// the one row that reaches the real channel:
+ /// `test/platform/window_manager_panel_window_test.dart`'s
+-/// `show, hide, blur and close all reach events through onWindowEvent`.
++/// `AD-8: show, focus, blur, hide and close all reach events through
++/// onWindowEvent`.
+ abstract interface class PanelWindow {
+   /// Maps the window. On Linux this is `gtk_widget_show`, which neither raises
+   /// it nor gives it the keyboard — hence [focus] as a separate step.
+diff --git a/lib/src/infrastructure/panel/window_manager_panel_visibility.dart b/lib/src/infrastructure/panel/window_manager_panel_visibility.dart
+index 54d062c..bd344ab 100644
+--- a/lib/src/infrastructure/panel/window_manager_panel_visibility.dart
++++ b/lib/src/infrastructure/panel/window_manager_panel_visibility.dart
+@@ -55,15 +55,44 @@ import 'panel_window.dart';
+ /// own echo, a focus loss, a minimize. That window is real, and it is the price
+ /// of the bound.
+ ///
+-/// Window events move the mirror only while no request of ours is outstanding.
+-/// That is the one case an event knows something the intent does not — the
+-/// window manager acting on its own — and it is what keeps an echo arriving
+-/// *during* one of our requests from being read as one.
++/// Window events divide in two, and the line between them is *what our own
++/// calls can cause* — not which signal the window sent.
+ ///
+-/// It does not cover an **abandoned** call, and that is the resurrection this
+-/// bound buys back: `_outstanding` came back down when the request let go, so
+-/// a `show` landing after a later `hide` has completed arrives with nothing of
+-/// ours outstanding and is believed like any other window-manager event. The
++/// The **echo-capable** ones the mirror is reconciled from are `show`, `hide`
++/// and `restore`. This adapter's only platform calls are `show`, `hide` and
++/// `focus`; `focus()` is `gtk_window_present`, which maps a hidden toplevel,
++/// and `windowManager.show()` deiconifies a minimised one as part of its own
++/// implementation — so each of those three events can be the window reporting
++/// one of our requests back at us. They move the mirror only while nothing of
++/// ours is outstanding (`_reconcile`). That is the one case an event knows
++/// something the intent does not — the window manager acting on its own — and
++/// it is what keeps an echo arriving *during* one of our requests from being
++/// read as one.
++///
++/// The **structurally external** ones are `minimize` and `close`. Nothing this
++/// adapter calls iconifies, and nothing it calls produces a GTK
++/// `delete-event`, so neither can ever be an echo of ours; both are therefore
++/// obeyed whatever is outstanding. A `minimize` moves the mirror straight
++/// (DW-31) — an iconified panel is not up, whoever asked — and a `close` puts
++/// the window away for real (DW-12). `minimize` and `restore` reach Dart from
++/// the same GTK `window-state-event` handler and still land on opposite sides
++/// of this line, which is why the split cannot be read off the signal.
++///
++/// `focus` is echo-capable too, by the same rule — `focus()` is one of our
++/// three calls and produces one. It is nonetheless believed unguarded, and the
++/// reason is that it is not a claim about the *mirror*: an echo of our own
++/// `focus()` still reports truthfully that the window holds the keyboard, so
++/// there is nothing to be misled by. What it does need is a `_visible` guard,
++/// for a different reason entirely — the plugin emits it asynchronously, so our
++/// own `focus()`'s event lands after that call's reply and can arrive at a
++/// panel the same round trip has just put away. The arm says how. `blur` is the
++/// other half of that pair and is answered by [_onBlur], not by the mirror.
++///
++/// The `_reconcile` guard does not cover an **abandoned** call, and that is
++/// the resurrection this bound buys back: `_outstanding` came back down when
++/// the request let go, so a `show` landing after a later `hide` has completed
++/// arrives with nothing of ours outstanding and is believed like any other
++/// window-manager event. The
+ /// mirror goes back to true — *correctly*, because the window really did map —
+ /// and [changes] emits a second `true`, so `CorrectionController` starts a
+ /// fresh session (AD-18). The panel the user dismissed is on screen again, and
+@@ -155,10 +184,36 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   bool _disposed = false;
+ 
+   /// How many requests of ours are currently touching the window. While this
+-  /// is non-zero every window event is an echo of our own intent, already
+-  /// reported by the mirror.
++  /// is non-zero a window event that is echo-capable *and* a claim about the
++  /// mirror — `show`, `hide`, `restore` — is our own intent coming back,
++  /// already reported by the mirror. (`focus` is echo-capable too and is not in
++  /// that list, because it claims nothing about the mirror; see [_reconcile].)
+   int _outstanding = 0;
+ 
++  /// Whether the window holds the keyboard, as the window itself last said.
++  ///
++  /// Written from the `focus` and `blur` events and cleared whenever the mirror
++  /// goes to false, and read by [_onBlur] alone: a focus-out at a window that
++  /// never took the keyboard is not a dismissal (DW-33).
++  bool _focused = false;
++
++  /// A blur that arrived while a request of ours was outstanding and has not
++  /// been reconsidered yet (DW-32).
++  ///
++  /// A latch rather than a queue, deliberately: repeated blurs inside one round
++  /// trip are one user turning away, not several. Released by
++  /// [_releaseDeferredBlur] when [_outstanding] reaches zero.
++  ///
++  /// Dropped by three writers besides that release, all saying the same thing —
++  /// a blur belongs to the intent it was raised under, and any newer intent
++  /// voids it. [show] and [hide] drop it because that is where an intent is
++  /// *expressed*, including the two requests that write no mirror at all
++  /// (a `show()` at a visible panel, a `hide()` at a hidden one); [_setMirror]
++  /// drops it on any transition, which is the backstop for the intents the
++  /// window states rather than the caller — a `close`, a `minimize`, an
++  /// external `hide` event.
++  bool _deferredBlur = false;
++
+   /// The tail of the serialised request chain (mechanism two).
+   Future<void> _queue = Future<void>.value();
+ 
+@@ -176,6 +231,18 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+       // frozen is worse than doing nothing.
+       return Future<void>.value();
+     }
++    // Before the mirror, because the mirror may not move. A `show()` against an
++    // already-visible panel — AD-14's second launch, AD-12's tray entry — is
++    // the request DW-32 exists for, and it is also the one `_setMirror`
++    // early-returns on: same value in, nothing written, no latch cleared. A
++    // blur latched under an earlier round trip would then release against this
++    // summon and dismiss the panel the user just asked for, and because
++    // `_dismiss` moves the mirror synchronously the request queued here would
++    // read as superseded and issue nothing — the panel would simply never
++    // appear. The latch belongs to the intent it was raised under, so it is
++    // dropped wherever a new intent is *expressed*, not only where the mirror
++    // happens to move.
++    _deferredBlur = false;
+     _setMirror(true);
+     return _enqueue(true);
+   }
+@@ -185,6 +252,9 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+     if (_disposed) {
+       return Future<void>.value();
+     }
++    // Same reason as [show], and for the same shape of gap: a `hide()` against
++    // a panel the mirror already reads as hidden writes nothing either.
++    _deferredBlur = false;
+     _setMirror(false);
+     return _enqueue(false);
+   }
+@@ -266,6 +336,19 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+       }
+     } finally {
+       _outstanding -= 1;
++      if (_outstanding == 0) {
++        // The release point for a latched blur, and the reason nothing here
++        // needs a timer: the adapter already knows exactly when the request
++        // chain lets go of the window, because this is it.
++        //
++        // Reads as a 1-to-0 transition because mechanism two makes it one —
++        // every request is a link of `_queue`, so exactly one `_apply` is ever
++        // in flight and this counter only ever holds 0 or 1. A change that let
++        // two run concurrently would still satisfy this condition, but only for
++        // whichever finished last, and a blur latched under the other would sit
++        // here with nothing left to reconsider it and no timer to notice.
++        _releaseDeferredBlur();
++      }
+     }
+   }
+ 
+@@ -311,6 +394,17 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+         _reconcile(true);
+       case 'restore':
+         // `gtk_window_deiconify` + `gtk_window_present`: the window is back.
++        //
++        // The keyboard is deliberately *not* restored with it. `_setMirror`
++        // cleared `_focused` on the way down (see there), and this arm does not
++        // put it back, because a mirror moving to true is not the window saying
++        // it holds the keyboard — only a `focus` says that. On Linux
++        // `gtk_window_present` normally does take it, so a real focus-in
++        // follows and re-arms the flag a turn later; where it does not, the
++        // restored panel cannot answer a focus-out until the user clicks into
++        // it. That is the missed-dismissal direction the clear already accepts,
++        // and it is a claim only a session can settle — `## Not covered here`
++        // in `test/platform/runtime-observation-checklist.md` carries it.
+         _reconcile(true);
+       case 'hide':
+         _reconcile(false);
+@@ -340,15 +434,78 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+         //
+         // No `_outstanding` guard, deliberately: `close` is a GTK
+         // `delete-event`, and this adapter's only platform calls are `show`,
+-        // `hide` and `focus`, so a close can never be an echo of ours. That is
+-        // the direction DW-31 already decided for this event; its `minimize`
+-        // half is untouched below.
++        // `hide` and `focus`, so a close can never be an echo of ours. It is
++        // structurally external, and `minimize` below now sits on that same
++        // side for the same reason (DW-31).
+         _dismiss('close');
+       case 'minimize':
+-        // `gtk_window_iconify` emits no GTK `hide` signal, so without this an
+-        // iconified panel leaves the mirror claiming it is up and the next
+-        // press is spent hiding a window nobody can see.
+-        _reconcile(false);
++        // Structurally external, exactly as `close` is: `minimize` comes from a
++        // GTK `window-state-event` and nothing this adapter calls iconifies, so
++        // it can never be an echo of ours. It goes straight to the mirror
++        // rather than through `_reconcile`, because the guard there would
++        // discard the one signal an iconify produces at all whenever it landed
++        // during a request of ours (DW-31).
++        //
++        // Nothing else would report it: `gtk_window_iconify` emits no GTK
++        // `hide` signal. And an iconified panel is not merely mislabelled —
++        // `main.dart` calls `setSkipTaskbar(true)` on this toplevel, so there
++        // is no task-bar entry to click it back from and the hotkey is the only
++        // way to reach it. With the mirror still reading `true`, that press is
++        // spent issuing a `hide` against a window nobody can see, and the user
++        // has to press twice to get the panel back.
++        //
++        // The cost of leaving `_reconcile` has two halves. A minimize landing
++        // during one of our requests now emits a `changes` transition the guard
++        // used to swallow, and every `true` after it starts a fresh session
++        // (AD-18) — so re-summoning an iconified panel re-reads the clipboard
++        // and discards whatever was typed into it. And a mirror written here
++        // can supersede a request that is *queued but not yet started*:
++        // `_apply` returns early when `_visible` no longer matches the intent
++        // it was enqueued with, so a second press already waiting behind an
++        // in-flight one evaporates without reaching the window. That is the
++        // same shape the `restore` half of the split exists to prevent, and it
++        // is allowed here because the two events mean opposite things — a
++        // `restore` claims the panel is back, while a `minimize` says the user
++        // cannot see it, and a queued summon that dies against a genuinely
++        // iconified window costs one press rather than stranding a dismissal.
++        //
++        // Both halves taken deliberately: the alternative is a mirror that lies
++        // about a window the user cannot see or reach, and the editor is lost
++        // either way once the panel is gone from the screen.
++        _setMirror(false);
++      case 'focus':
++        // Believed whoever caused it, *while the mirror says a panel is up*.
++        // Our own `focus()` and the user clicking the panel both mean the
++        // window really does hold the keyboard, so an echo needs no guard here
++        // — the fact it reports is true either way, and it is the fact
++        // `_onBlur` cannot decide a dismissal without (DW-33).
++        //
++        // The `_visible` guard is about *when* it arrives, not who caused it.
++        // The plugin emits this through `_emit_event`, an asynchronous
++        // `fl_method_channel_invoke_method`
++        // (`window_manager-0.5.2/linux/window_manager_plugin.cc:959-977`), so
++        // our own `focus()`'s event always lands *after* that call's channel
++        // reply — and therefore after anything the request's completion set in
++        // motion, including a deferred blur releasing into a `hide`. Recorded
++        // unguarded, that trailing event would write `true` over a mirror
++        // already reading false, and `_setMirror` could not clear it: it is a
++        // no-op once `_visible` is false. The next summon would then open with
++        // a stale keyboard and the first spurious focus-out would dismiss the
++        // panel the user just asked for, which is DW-33 reinstated by its own
++        // fix.
++        //
++        // The guard cannot tell "too late" from "too early", and the second is
++        // the price of it: while the mirror wrongly reads false over a window
++        // that really is mapped — the state `_onBlur`'s doc names as reachable,
++        // and the one a `minimize` landing inside `_apply` produces — a genuine
++        // focus-in is discarded here, and nothing re-arms the flag when a later
++        // `restore` or `show` echo corrects the mirror. CAP-14 then misses the
++        // user's next click-away for that panel. Same direction as every other
++        // trade in this file: a missed dismissal, never a panel that dismisses
++        // itself.
++        if (_visible) {
++          _focused = true;
++        }
+       case 'blur':
+         _onBlur();
+     }
+@@ -357,13 +514,26 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   /// Believes a window event, but only when it can be telling us something we
+   /// did not already know.
+   ///
+-  /// The guard covers `restore` and `minimize` as well as `show` and `hide`,
+-  /// and that is load-bearing rather than tidiness: `windowManager.show()`
+-  /// restores a minimised window as part of its own implementation, so a
+-  /// `restore` echo can arrive *during* one of our requests. Believing it
+-  /// while a hide is queued behind that show would flip the mirror back to
+-  /// true and make the queued hide look superseded — the panel would stay on
+-  /// screen, which is the exact defect this adapter exists to close.
++  /// Reached from the events that are **both** echo-capable and claims about
++  /// the mirror — `show`, `hide` and `restore`. `minimize` and `close` bypass
++  /// it because nothing this adapter calls can produce either (DW-31, DW-12),
++  /// so for those two there is no echo to swallow and the guard could only
++  /// discard the event outright. That split is the reason this method covers
++  /// three of the five arms that move the mirror and not all five; it is not a
++  /// judgement about which arms deserve tidying.
++  ///
++  /// `focus` is echo-capable as well and is still not reached from here, for a
++  /// third reason again: it is not a claim about the mirror at all. See the
++  /// class doc's taxonomy, which is by *what our own calls can cause* and so
++  /// puts `focus` on this side of the line while this method does not.
++  ///
++  /// `restore` being on this side is the load-bearing half of the split:
++  /// `windowManager.show()` restores a minimised window as part of its own
++  /// implementation, so a `restore` echo can arrive *during* one of our
++  /// requests. Believing it while a hide is queued behind that show would flip
++  /// the mirror back to true and make the queued hide look superseded — the
++  /// panel would stay on screen, which is the exact defect this adapter exists
++  /// to close.
+   void _reconcile(bool visible) {
+     if (_outstanding > 0) {
+       return;
+@@ -374,24 +544,119 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   /// CAP-14's focus-loss hide, performed by the adapter because the
+   /// alternative — the application ring deciding it — needs a focus signal on
+   /// [PanelVisibility], and the port is AD-8 verbatim.
++  ///
++  /// Three questions, in this order.
++  ///
++  /// *Is the panel up?* A hidden panel has no focus to lose.
++  ///
++  /// *Did the window ever hold the keyboard?* A focus-out at a window that
++  /// never took it is not a dismissal — it is a window manager with
++  /// focus-stealing prevention declining to hand the keyboard over when the
++  /// panel was mapped, and hiding on it takes the panel down at the very moment
++  /// the user summoned it (DW-33). [_focused] is cleared here as well as read:
++  /// whatever else is true, the window does not hold the keyboard now.
++  ///
++  /// *Is a request of ours outstanding?* Then the blur is **latched**, not
++  /// acted on and not dropped. It cannot simply be believed, because the
++  /// mapping half of our own `show` produces one. It must not be discarded
++  /// either: a `show()` against an **already-visible** panel — AD-14's second
++  /// launch, AD-12's tray entry — is a full round trip during which the user
++  /// really can click away, and nothing would ever re-ask (DW-32).
++  /// [_releaseDeferredBlur] reconsiders it when the chain lets go.
++  ///
++  /// The first two questions are not independent, and the order above is the
++  /// readable one rather than the minimal one: [_focused] is written `true`
++  /// only under a `_visible` mirror and cleared on every transition away from
++  /// one, so `_focused` implies `_visible` and `!_visible` can never be the
++  /// sole reason this returns. It is kept because the alternative is a
++  /// dismissal that depends on an invariant held elsewhere, and because the
++  /// two questions are about different things — one about the panel, one about
++  /// the keyboard. A reader should not have to derive the first from the
++  /// second. The suite's negative-control record says which of them each row
++  /// actually fails for.
++  ///
++  /// An *abandoned* map is now reached by the second question rather than
++  /// escaping all three, and that is a change from the pre-DW-33 arm.
++  /// `_outstanding` is back down while an abandoned call is still in flight, so
++  /// a blur landing there used to issue a `hide` that raced it. If the map was
++  /// the panel's first, no `focus` ever arrived, [_focused] is false and the
++  /// blur is swallowed — no race, and no mirror over a mapped window. The old
++  /// path survives only where the panel was already up and focused from an
++  /// earlier settled summon and a *later* request was abandoned: there the hide
++  /// still races, deliberately, because suppressing it would cost the ordinary
++  /// focus-loss case CAP-14 is about. The mirror is then honest only if that
++  /// racing hide is itself answered. If it is, the window unmaps and `false` is
++  /// true of both. If it too is abandoned, the late map's echo lands while the
++  /// hide still has `_outstanding` up and `_reconcile` swallows it (mechanism
++  /// four above covers only an echo arriving with nothing outstanding), so the
++  /// mirror reads `false` over a mapped window until some later window event
++  /// moves it. That needs a window unresponsive twice running, which is the
++  /// same window this bound exists for.
+   void _onBlur() {
+-    if (!_visible || _outstanding > 0) {
+-      // A hidden panel has no focus to lose, and a blur arriving while a
+-      // request of ours is outstanding is that request's own doing rather than
+-      // the user's.
+-      //
+-      // Neither guard reaches an *abandoned* map: `_outstanding` is already
+-      // back down while that call is still in flight, so a blur landing there
+-      // issues a `hide` that races it. Deliberately left standing, because
+-      // suppressing the hide would cost the ordinary focus-loss case CAP-14 is
+-      // about — but the mirror is only honest afterwards if that racing hide
+-      // is itself answered. If it is, the window unmaps and `false` is true of
+-      // both. If it too is abandoned, the late map's echo lands while the hide
+-      // still has `_outstanding` up and `_reconcile` swallows it (mechanism
+-      // four above covers only an echo arriving with nothing outstanding), so
+-      // the mirror reads `false` over a mapped window until some later window
+-      // event moves it. That needs a window unresponsive twice running, which
+-      // is the same window this bound exists for.
++    final heldFocus = _focused;
++    _focused = false;
++    if (!_visible || !heldFocus) {
++      return;
++    }
++    if (_outstanding > 0) {
++      _deferredBlur = true;
++      return;
++    }
++    _dismiss('focus-loss');
++  }
++
++  /// Reconsiders a blur that [_onBlur] latched, now that the request chain has
++  /// let go of the window.
++  ///
++  /// State is re-read here rather than trusted from when the blur arrived,
++  /// because the request that suppressed it has been running in between: the
++  /// adapter may have been torn down, and the user may have clicked back onto
++  /// the panel.
++  ///
++  /// Which of the three re-reads carries which case needs saying, because two
++  /// of them are backstops and only one decides anything on its own.
++  ///
++  /// `!_visible` is the backstop. It reads as the guard for "the panel was
++  /// already dismissed by a press while this request was in flight", and that
++  /// case is real — but it is answered before the release ever runs, by the
++  /// latch drops in [show], [hide] and [_setMirror]: a press that put the panel
++  /// away dropped the latch on its way through, so this method returns at
++  /// `!_deferredBlur` above and never reaches here. With the latch set,
++  /// `_visible` is true by construction. The re-read stays because the
++  /// alternative is a dismissal whose correctness rests on an invariant three
++  /// other methods have to keep, but nothing here fails if it is deleted, and
++  /// no row pins it — see the negative-control record in this adapter's suite.
++  ///
++  /// `_disposed` is the same shape: [hide] returns without touching the window
++  /// once the adapter is closed, so the [_dismiss] below is already inert by
++  /// the time it would matter. It is stated here so a later `_dismiss` that
++  /// reached the seam directly would not silently move a real window on the
++  /// teardown path.
++  ///
++  /// `_focused` is the live one, and it needs saying precisely, because the
++  /// obvious reading of it is wrong too. It is **not** there to catch our own
++  /// `focus()` taking the
++  /// keyboard back: that call's `focus` event is emitted asynchronously by the
++  /// plugin and cannot reach Dart before this method runs, since this runs on
++  /// the same turn as the reply that call already returned. In the ordinary
++  /// DW-32 flow the check therefore does not fire at all, and the `focus`
++  /// arriving afterwards is discarded by that arm's own `_visible` guard. What
++  /// the re-read *is* for is a focus-in that really can beat the release: a
++  /// user who clicks away and then clicks back onto the panel while the round
++  /// trip is still open. They ended up on the panel, so there is no dismissal
++  /// left to perform — acting on the blur then would be DW-33's defect reached
++  /// through DW-32's door.
++  ///
++  /// The latch is dropped whether or not the dismissal happens: one round trip
++  /// answers it once, and a blur that no longer applies is not owed to any
++  /// later request. [show], [hide] and [_setMirror] drop it too — see
++  /// [_deferredBlur] for the rule the four of them share.
++  void _releaseDeferredBlur() {
++    if (!_deferredBlur) {
++      return;
++    }
++    _deferredBlur = false;
++    if (_disposed || !_visible || _focused) {
+       return;
+     }
+     _dismiss('focus-loss');
+@@ -400,9 +665,18 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+   /// Puts the panel away on the window's own initiative, and reduces a refusal
+   /// to a log line.
+   ///
+-  /// Shared by the two arms that mean "the user is done with this window" — a
+-  /// focus loss (CAP-14) and a close (DW-12) — because both want the identical
+-  /// thing: a real `hide`, issued without awaiting it, whose rejection must not
++  /// Three call sites, two causes. Both causes mean "the user is done with this
++  /// window" — a focus loss (CAP-14) and a close (DW-12) — and the focus loss
++  /// reaches here by two routes: [_onBlur] when nothing of ours is outstanding,
++  /// and [_releaseDeferredBlur] when a blur latched during a request is
++  /// reconsidered afterwards (DW-32). The deferred route is the same cause and
++  /// carries the same [cause] string deliberately: to whoever reads the log, a
++  /// dismissal delayed by one round trip is still a focus loss, and splitting
++  /// it would put a third vocabulary in front of them for no difference they
++  /// can act on.
++  ///
++  /// All three want the identical thing: a real `hide`, issued without awaiting
++  /// it, whose rejection must not
+   /// escape into the zone as an uncaught error in a daemon whose job is to stay
+   /// up. The mirror has already led inside [hide], so a refusal costs the line
+   /// and nothing else.
+@@ -429,6 +703,44 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
+       return;
+     }
+     _visible = visible;
++    // A transition is an intent, and a blur raised before it belonged to the
++    // panel that intent replaced. `_releaseDeferredBlur` re-reads `_visible`,
++    // and `_visible` alone cannot tell "still the panel the blur belonged to"
++    // from "a different panel that happens to be up" — both read true.
++    //
++    // This is the **backstop** half of that rule, not the whole of it. It
++    // covers the transitions the *window* causes, which is all it can cover:
++    // this method early-returns above when the value does not change, so the
++    // two caller-side requests that write nothing — a `show()` at a visible
++    // panel, a `hide()` at a hidden one — would walk straight past it. Those
++    // are dropped in [show] and [hide] instead, where the intent is expressed
++    // rather than where the mirror moves, and the first of them is precisely
++    // the request DW-32 is about.
++    //
++    // With those two in place this line pins nothing — every window-driven
++    // route to a false mirror also leaves `_visible` false at the release
++    // point, where [_releaseDeferredBlur] answers it. It stays as the statement
++    // that a transition the *window* causes voids a blur as surely as a press
++    // does, and the suite's negative-control record says plainly that no row
++    // fails for its deletion, so nobody reads it as the mechanism carrying a
++    // case.
++    _deferredBlur = false;
++    if (!visible) {
++      // An unmapped window holds no keyboard. Without this, a hidden-then-shown
++      // panel would carry a stale "we hold the keyboard" from its previous life
++      // and the first spurious blur after a summon would dismiss it — exactly
++      // what DW-33 exists to stop. `_onBlur` clears the flag on its own path,
++      // so what this line is actually for is every *other* route the mirror
++      // takes to false: a `close`, a `minimize`, an external `hide` event, a
++      // hide the window refused.
++      //
++      // The cost is the mirror image: if the mirror goes false while the window
++      // really is mapped and focused, a later genuine blur is ignored and
++      // CAP-14 misses one dismissal. That is the direction to be wrong in — a
++      // missed dismissal costs the user one press, a panel that dismisses
++      // itself costs them the panel.
++      _focused = false;
++    }
+     _changes.add(visible);
+   }
+ 
+diff --git a/test/architecture/panel_event_forwarding_test.dart b/test/architecture/panel_event_forwarding_test.dart
+index eab658d..3fbf016 100644
+--- a/test/architecture/panel_event_forwarding_test.dart
++++ b/test/architecture/panel_event_forwarding_test.dart
+@@ -5,10 +5,15 @@ import 'package:test/test.dart';
+ /// `WindowManagerPanelWindow.onWindowEvent` forwards every event name
+ /// unfiltered, and that is load-bearing rather than incidental.
+ ///
+-/// The visibility adapter above it reconciles its mirror from `show`, `hide`,
+-/// `restore` and `minimize`, dismisses on `blur` (CAP-14), and — since DW-12 —
+-/// puts the panel away on `close`. Every one of those arms is reached only
+-/// because this forwarder passes the raw name straight through. Narrow it with
++/// The visibility adapter above it reconciles its mirror from `show`, `hide`
++/// and `restore`, moves it straight from `minimize`, dismisses on `blur`
++/// (CAP-14) — but only when a `focus` said the window ever held the keyboard
++/// (DW-33) — and, since DW-12, puts the panel away on `close`. Every one of
++/// those arms is reached only because this forwarder passes the raw name
++/// straight through, and `focus` is the newest of them: drop that one name and
++/// the adapter stops dismissing the panel on focus loss entirely, because the
++/// `blur` arm can no longer tell a real focus-out from one at a window that
++/// never took the keyboard. Narrow it with
+ /// an event-name filter, or swap it for `WindowListener`'s typed callbacks, and
+ /// the arms that lost their event stop running with nothing to report it: the
+ /// adapter's own suite drives `FakePanelWindow` directly and never touches this
+diff --git a/test/infrastructure/panel/window_manager_panel_visibility_test.dart b/test/infrastructure/panel/window_manager_panel_visibility_test.dart
+index 26c7fac..42dae3d 100644
+--- a/test/infrastructure/panel/window_manager_panel_visibility_test.dart
++++ b/test/infrastructure/panel/window_manager_panel_visibility_test.dart
+@@ -34,28 +34,108 @@ const Duration _stallBound = Duration(seconds: 1);
+ /// correct mirror over a panel that was still on screen, and a suite that
+ /// asserted only the mirror certified it green.
+ ///
+-/// **Negative controls.** Five mutations of
+-/// `window_manager_panel_visibility.dart` were applied to the shipped tree,
+-/// the binding-free suite re-run, and each reverted. Each is stated as the
+-/// exact edit, because a count no one can reproduce is not evidence — an
+-/// earlier pass recorded these twice, here and in the ledger, with three of
+-/// the four numbers disagreeing:
++/// **Negative controls.** Sixteen mutations of
++/// `window_manager_panel_visibility.dart` were applied to this tree, this file
++/// re-run against each, and each reverted **from a copy** rather than with
++/// `git checkout --`, which would have discarded the patch under review along
++/// with the mutation. Each is stated as the exact edit, and every count is
++/// failures *in this file* over a baseline confirmed green first — 61 rows,
++/// all passing — because a count no one can reproduce is not evidence, and a
++/// run whose baseline was never checked reports the same number for every gate.
++/// An earlier pass recorded these twice, here and in the ledger, with three of
++/// the four numbers disagreeing; every one below was re-measured on this tree
++/// rather than carried over, and control 1 and control 10 have both moved
++/// since the last pass wrote them (39 and 1 respectively) — see their entries.
++///
++/// **Five of the sixteen fail nothing**, and that is recorded rather than
++/// corrected. Each of those five is a guard that states a real precondition
++/// while a second mechanism already makes the outcome hold, so no row can be
++/// written that fails for it alone. Saying which is the point of this block: a
++/// guard nobody can break is one a later reader must not mistake for the thing
++/// carrying the case.
+ ///
+ /// 1. `show()`/`hide()` rewritten to
+ ///    `return _enqueue(v).whenComplete(() => _setMirror(v));`, so the mirror
+-///    is assigned *after* the first await rather than before it — 13 failures
++///    is assigned *after* the first await rather than before it — 38 failures.
++///    Read 39 last pass; the two-blurs row now regains focus between the blurs
++///    (see there) and survives a lagging mirror where it did not before.
+ /// 2. the `if (_outstanding > 0) return;` guard deleted from `_reconcile`
+-///    — 2 failures
++///    — 5 failures
+ /// 3. both superseded-request checks deleted (`if (_visible != intended)
+ ///    return;` on entry to `_apply`, and the `_visible != intended` half of
+-///    the re-check between `show()` and `focus()`) — 3 failures
++///    the re-check between `show()` and `focus()`) — 5 failures
+ /// 4. serialisation removed (`_enqueue` reduced to `return _apply(intended);`)
+-///    — 3 failures
++///    — 4 failures
+ /// 5. the `restore` arm changed from `_reconcile(true)` to `_setMirror(true)`,
+-///    so it walks past the guard — 1 failure. This one failed **zero** before
+-///    the row that now pins it; mutation 2 deletes the guard wholesale but
+-///    both tests it fails are `show`-echo rows, so the `restore` coverage the
+-///    adapter's doc calls load-bearing was unpinned.
++///    so it walks past the guard — 1 failure, the restore row itself. That row
++///    is what pins the coverage the adapter's doc calls load-bearing: before
++///    it, this mutation failed **zero**.
++/// 6. the DW-33 focus requirement deleted from `_onBlur` — `heldFocus` dropped,
++///    so the arm opens `if (!_visible) return;` again and answers a blur
++///    whether or not the window ever took the keyboard — 4 failures. Five rows
++///    here are titled DW-33; these are the four that turn on the *requirement*
++///    — the bare-blur row, the trailing-focus row, the minimize/restore clear
++///    and the blur-during-a-show row. The fifth, focus-regained-before-release,
++///    is carried by the latch rather than by this guard and survives.
++///    Without them the whole suite stays green
++///    while the panel dismisses itself on the summon under any compositor with
++///    focus-stealing prevention, because every other blur row here delivers a
++///    `focus` first or expects nothing to happen anyway.
++/// 7. the DW-32 latch deleted — `_deferredBlur = true` replaced by a bare
++///    `return`, so a blur suppressed by `_outstanding` is dropped again as it
++///    was before — 3 failures, the two latch rows and the deferred-refusal
++///    log row.
++/// 8. `minimize` routed back through `_reconcile(false)`, putting the
++///    `_outstanding` guard in front of it — 1 failure, the DW-31 row. The
++///    guard has no echo to swallow on that arm, so it can only discard the one
++///    signal an iconify produces; nothing else in this file poses a `minimize`
++///    while a request is in flight.
++/// 9. the `_visible` guard deleted from the `focus` arm, so a focus event is
++///    recorded whatever the mirror says — 1 failure, the trailing-focus row.
++/// 10. `_deferredBlur = false` deleted from `_setMirror` — **0 failures**, and
++///    it read 1 last pass. That is the direct cost of control 15's fix: with
++///    [show] and [hide] dropping the latch where the intent is expressed, every
++///    remaining route to a false mirror during a latched round trip (a `close`,
++///    a `minimize`, a refused hide) also leaves `_visible` false at the release
++///    point, where `!_visible` answers it. The clear stays as the statement
++///    that a window-driven transition voids a blur too, but nothing here can
++///    break it any more, and no row should be read as pinning it.
++/// 11. the `_focused` clear in `_setMirror` made unreachable
++///    (`if (!visible)` to `if (false)`) — 1 failure, the minimize/restore row.
++///    Before that row this mutation failed **zero**: every other path to a
++///    false mirror in this file goes through `_onBlur`, which clears the flag
++///    itself.
++/// 12. `!_visible ||` deleted from `_onBlur`'s first question — **0 failures**.
++///    `_focused` is written only under a visible mirror and cleared on every
++///    transition away from one, so it implies `_visible` and the clause can
++///    never decide that return by itself. Kept because the two questions are
++///    about different things and a reader should not have to derive one from
++///    the other.
++/// 13. `!_visible ||` deleted from `_releaseDeferredBlur` — **0 failures**.
++///    Reads as the guard for "a press already dismissed the panel", and that
++///    case is real, but controls 15 and 16 close it earlier: the press dropped
++///    the latch, so the release returns before this line. With the latch set,
++///    `_visible` is true by construction.
++/// 14. `_disposed ||` deleted from `_releaseDeferredBlur` — **0 failures**.
++///    [WindowManagerPanelVisibility.hide] returns without touching the seam
++///    once the adapter is closed, so the dismissal behind this guard is already
++///    inert. It matters only against a future `_dismiss` that reached the
++///    window directly, which is exactly why it is written down.
++/// 15. `_deferredBlur = false` deleted from `show()`, so a latch survives a
++///    request that writes no mirror — 1 failure, the re-summon-that-moves-no-
++///    mirror row, and nothing else. This is the gate for the defect a review
++///    pass found still open after control 10's fix: `_setMirror` early-returns
++///    when the value does not change, and `show()` on an already-visible panel
++///    is both the request that does that and the request DW-32 exists for.
++/// 16. the same deletion from `hide()` — **0 failures**. A latch requires a
++///    visible mirror, so a `hide()` reaching it always transitions and control
++///    10's clear covers it. Kept for symmetry with `show()`, and recorded here
++///    so the symmetry is not mistaken for coverage.
++///
++/// 9 and 11 are deliberately pinned by rows that fail for one of them and not
++/// the other — the trailing-focus row never delivers a `focus` while the panel
++/// is up, and the minimize/restore row never delivers one while it is down. A
++/// single row failing for both would have proved neither.
+ ///
+ /// Recorded here rather than as extra tests: a mutation is evidence about this
+ /// suite, not behaviour the daemon has. This is the single record — the
+@@ -421,6 +501,76 @@ void main() {
+       expect(visibility.isVisible, isTrue);
+     });
+ 
++    test('DW-31: a minimize arriving during one of our requests still moves '
++        'the mirror — nothing this adapter calls iconifies, so it can never '
++        'be an echo', () async {
++      // The half of the split that is easy to get wrong, because `minimize`
++      // and `restore` arrive from the same GTK `window-state-event` handler
++      // and the row above pins `restore` on the other side of it. The
++      // asymmetry is one-directional and real: `windowManager.show()`
++      // deiconifies as part of its own implementation, so a `restore` can be
++      // our own doing, while nothing this adapter calls iconifies anything.
++      //
++      // Routed through `_reconcile`, this event was discarded outright — the
++      // guard has no echo to swallow here, only the one signal an iconify
++      // produces at all. `gtk_window_iconify` emits no GTK `hide` either, and
++      // `main.dart` calls `setSkipTaskbar(true)`, so there is no task-bar entry
++      // to click the panel back from: the hotkey is the only way to reach it,
++      // and with the mirror still reading `true` that press was spent hiding a
++      // window nobody could see.
++      final emitted = <bool>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++
++      // AD-14's second launch against an already-visible panel, parked at the
++      // window: `_outstanding` is up, which is the state under test.
++      final showing = visibility.show();
++      await pumpEventQueue();
++
++      window.emitEvent('minimize');
++      await pumpEventQueue();
++
++      expect(
++        visibility.isVisible,
++        isFalse,
++        reason: 'an iconified panel is not up, whoever asked for the iconify',
++      );
++      expect(emitted, [true, false]);
++
++      await window.settle();
++      await showing;
++      await pumpEventQueue();
++
++      expect(
++        visibility.isVisible,
++        isFalse,
++        reason:
++            'and the request that was in flight does not put it back: the '
++            'mirror no longer holds that intent, so the show stops before its '
++            'trailing focus',
++      );
++      // The window surface, not the mirror alone. This suite exists because a
++      // correct mirror over a wrong window is the defect class it missed once
++      // already, and a `minimize` arm that answered with `_dismiss` instead of
++      // `_setMirror` would satisfy every assertion above while issuing a
++      // platform `hide` the window manager never asked for.
++      expect(
++        window.calls,
++        ['show', 'focus', 'show'],
++        reason:
++            'an iconify is the window manager reporting a state it has already '
++            'reached — the mirror follows it, and nothing is issued back',
++      );
++      expect(
++        window.visible,
++        isTrue,
++        reason:
++            'the fake models a mapped toplevel and cannot model an iconified '
++            'one, so this is the premise rather than the claim: what the row '
++            'asserts is that the adapter did not unmap it itself',
++      );
++    });
++
+     test(
+       'AD-8: a restore arriving during one of our requests is not believed '
+       '— the guard covers it, and that is what keeps a queued hide alive',
+@@ -504,9 +654,10 @@ void main() {
+ 
+     test('DW-12: a close arriving while a request of ours is outstanding is '
+         'still obeyed — a close can never be an echo of ours', () async {
+-      // The deliberate asymmetry with the blur twin below ("a blur arriving
+-      // while a show is outstanding is ignored"), and the one decision in this
+-      // arm that nothing else here can see. `close` is a GTK `delete-event`,
++      // The deliberate asymmetry with the blur twin below (a blur arriving
++      // while a show is outstanding is never dismissed on the spot — it is
++      // dropped or latched), and the one decision in this arm that nothing
++      // else here can see. `close` is a GTK `delete-event`,
+       // and this adapter's only platform calls are `show`, `hide` and `focus`,
+       // so it is the one window event that cannot be an echo of a request of
+       // ours — which is why the arm skips the `_outstanding` guard every other
+@@ -554,12 +705,12 @@ void main() {
+     test('DW-12: a close is obeyed even when the mirror already reads hidden — '
+         'a close always means a mapped window', () async {
+       // The arm's other unguarded property, and the twin of the row above. The
+-      // blur arm opens `if (!_visible || _outstanding > 0) return;`, and both
+-      // halves of that guard look like they belong in the `_dismiss` helper the
+-      // two arms now share. `_outstanding` is pinned above; without this row,
+-      // adding `if (!_visible) { return; }` to `_dismiss` leaves the whole
+-      // suite green — every other close row shows the panel first, so `_visible`
+-      // is true at each of them.
++      // blur arm asks `!_visible` and `_outstanding > 0` before it dismisses
++      // anything, and both of those look like they belong in the `_dismiss`
++      // helper the two arms now share. `_outstanding` is pinned above; without
++      // this row, adding `if (!_visible) { return; }` to `_dismiss` leaves the
++      // whole suite green — every other close row shows the panel first, so
++      // `_visible` is true at each of them.
+       //
+       // The state this builds is the one `_onBlur`'s own doc names as reachable:
+       // "the mirror reads `false` over a mapped window until some later window
+@@ -753,12 +904,20 @@ void main() {
+   });
+ 
+   group('the focus-loss hide (CAP-14)', () {
+-    test('CAP-14: a blur on a visible panel hides it, mirror and window '
+-        'together', () async {
++    test('CAP-14: a blur after the window took the keyboard hides the panel, '
++        'mirror and window together', () async {
++      // The row that must not regress, and the reason the `focus` event is
++      // delivered here rather than assumed: since DW-33 the adapter answers a
++      // focus-out only when a focus-in said the window ever held the keyboard.
++      // Deleting that requirement is a mutation the DW-33 row below catches;
++      // deleting the *dismissal* is what this row catches.
+       final emitted = <bool>[];
+       visibility.changes.listen(emitted.add);
+       await _settled(visibility.show(), window);
+ 
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
+       window.emitEvent('blur');
+       await pumpEventQueue();
+ 
+@@ -772,10 +931,156 @@ void main() {
+       expect(emitted, [true, false]);
+     });
+ 
+-    test('CAP-14: a blur while the panel is hidden does nothing', () async {
++    test('DW-33: a blur at a panel the window manager never gave the keyboard '
++        'to does nothing — the panel must not dismiss itself at the moment it '
++        'is summoned', () async {
++      // A compositor with focus-stealing prevention maps the panel and leaves
++      // the keyboard where it was, then sends a focus-out as the pointer or the
++      // previous window settles. Answered as a dismissal, that is CAP-14 firing
++      // on the summon itself: the user presses the hotkey and the panel appears
++      // and vanishes.
++      //
++      // This row is the first of the two questions the arm now asks, and the
++      // one the CAP-14 row above deliberately does not exercise — that row
++      // delivers a `focus` first.
++      final emitted = <bool>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++
++      window.emitEvent('blur');
++      await pumpEventQueue();
++      await window.settle();
++      await pumpEventQueue();
++
++      expect(
++        visibility.isVisible,
++        isTrue,
++        reason: 'no focus-in ever said the window held the keyboard',
++      );
++      expect(window.calls, ['show', 'focus']);
++      expect(
++        window.visible,
++        isTrue,
++        reason: 'and the panel the user just asked for is still on screen',
++      );
++      expect(emitted, [true]);
++    });
++
++    test('DW-33: a focus arriving at a panel that is already gone is not '
++        'recorded — the trailing event of our own focus() must not arm the '
++        'next summon', () async {
++      // Reachable in the *ordinary* flow, not a contrived one, and that is the
++      // point. The plugin emits every event through `_emit_event`, an
++      // asynchronous `fl_method_channel_invoke_method`
++      // (`window_manager-0.5.2/linux/window_manager_plugin.cc:959-977`), so the
++      // `focus` our own `gtk_window_present` causes always lands *after* that
++      // call's channel reply — and therefore after anything the request's
++      // completion set in motion, a deferred blur releasing into a `hide`
++      // included. Recorded unguarded it writes `true` over a mirror already
++      // reading false, and `_setMirror` cannot take it back: that clear is a
++      // no-op once `_visible` is false. The next summon then opens holding a
++      // keyboard it never took, and the first spurious focus-out dismisses the
++      // panel the user just asked for — DW-33 reinstated through its own fix.
++      //
++      // No `focus` is delivered while the panel is up, deliberately: that would
++      // make the row depend on `_setMirror`'s own clear as well and it would
++      // then fail for two different deletions, which proves neither. The clear
++      // has its own row below, and the realistic sequence — a real focus, a
++      // hide, then the trailing focus — is the two of them together.
++      await _settled(visibility.show(), window);
++      await _settled(visibility.hide(), window);
++
++      // The trailing event, arriving at a panel that has already gone.
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      final emitted = <bool>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++
++      window.emitEvent('blur');
++      await pumpEventQueue();
++      await window.settle();
++      await pumpEventQueue();
++
++      expect(
++        visibility.isVisible,
++        isTrue,
++        reason:
++            'the summon the user just made must not be dismissed by a keyboard '
++            'flag left behind by the one before it',
++      );
++      expect(window.visible, isTrue);
++      expect(emitted, [true]);
++    });
++
++    test('DW-33: the mirror going false on a route with no blur still clears '
++        'the keyboard — an unmapped window holds none', () async {
++      // `_onBlur` clears the flag on its own path, so the whole value of the
++      // clear in `_setMirror` lives in the routes the mirror takes to false
++      // *without* a blur: a `close`, a `minimize`, an external `hide` event, a
++      // hide the window refused. None of them was exercised, and before this
++      // row deleting the clear left the whole file green against a baseline
++      // confirmed green first. (The suite stood at 57 rows when that was
++      // measured; it is 61 now, which is why the negative-control block states
++      // failure counts and its own baseline rather than totals in prose.)
++      //
++      // A minimize is used because it is the shortest of those routes that can
++      // be reversed in the same row: the panel comes back, and the question is
++      // whether it comes back believing it still has the keyboard it held
++      // before it was iconified. It must not — the row above covers the other
++      // half, a focus arriving while the mirror is false, and neither row
++      // fails for the other's deletion.
+       final emitted = <bool>[];
+       visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      window.emitEvent('minimize');
++      await pumpEventQueue();
++      window.emitEvent('restore');
++      await pumpEventQueue();
++
++      expect(visibility.isVisible, isTrue, reason: 'the panel is back');
+ 
++      window.emitEvent('blur');
++      await pumpEventQueue();
++      await window.settle();
++      await pumpEventQueue();
++
++      expect(
++        visibility.isVisible,
++        isTrue,
++        reason:
++            'the keyboard the panel held in its previous life is not a '
++            'keyboard it holds now, and a restored window has to earn a focus '
++            'of its own before a focus-out means anything',
++      );
++      expect(window.calls, isNot(contains('hide')));
++      expect(emitted, [true, false, true]);
++    });
++
++    test('CAP-14: a blur while the panel is hidden does nothing — the other '
++        'question the arm asks before it dismisses anything', () async {
++      // A hidden panel has no focus to lose, and `close`'s twin row
++      // deliberately has no such guard — that asymmetry is what this row is
++      // beside.
++      //
++      // Which of the arm's two questions stops it is worth stating, because it
++      // is not the one the row is named for. The `focus` below arrives at a
++      // false mirror and the arm's own `_visible` guard discards it, so
++      // `_focused` is false and `!heldFocus` is what returns. `!_visible` can
++      // never decide this on its own — `_focused` is written only under a
++      // visible mirror and cleared on every transition away from one, so it
++      // implies `_visible`. Deleting `!_visible ||` from `_onBlur` leaves this
++      // file green; it is recorded as control 12 rather than fixed, since the
++      // clause states a real precondition and costs nothing.
++      final emitted = <bool>[];
++      visibility.changes.listen(emitted.add);
++
++      window.emitEvent('focus');
+       window.emitEvent('blur');
+       await pumpEventQueue();
+ 
+@@ -783,8 +1088,14 @@ void main() {
+       expect(window.calls, isEmpty);
+     });
+ 
+-    test('CAP-14: a blur arriving while a show is outstanding is ignored — a '
+-        'panel still being mapped was not dismissed', () async {
++    test('DW-33: a blur arriving while a show is outstanding, at a panel that '
++        'never held the keyboard, is dropped rather than latched', () async {
++      // The state story 5 wrote as "ignored — a user cannot have dismissed a
++      // panel that is still being mapped". That reading is right *here*,
++      // because this panel was not up and focused before the show: the blur is
++      // the map itself, not a dismissal. It is stopped by the DW-33 question,
++      // not by the latch — which is the discriminator this row carries, since
++      // a latch armed here would fire a hide the moment the round trip ended.
+       final showing = visibility.show();
+       await pumpEventQueue();
+ 
+@@ -795,14 +1106,352 @@ void main() {
+ 
+       await window.settle();
+       await showing;
++      await pumpEventQueue();
+ 
+-      expect(window.calls, ['show', 'focus']);
++      expect(
++        window.calls,
++        ['show', 'focus'],
++        reason:
++            'nothing was deferred, so nothing is dismissed when the request '
++            'chain lets go',
++      );
++      expect(window.visible, visibility.isVisible);
++    });
++
++    test('DW-32: a blur during a second show of an already-visible focused '
++        'panel is latched, and dismissed when the round trip ends', () async {
++      // The widening of story 5's row, and the case that row got wrong: a
++      // `show()` on a panel that is *already up* — AD-14's second launch,
++      // AD-12's tray entry — is a full round trip against a mapped, focused
++      // window, and the user really can click away during it. Returning early
++      // on `_outstanding` discarded that dismissal and nothing ever re-asked,
++      // so the panel stayed on screen until the next press.
++      final emitted = <bool>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      final showing = visibility.show();
++      await pumpEventQueue();
++
++      window.emitEvent('blur');
++      await pumpEventQueue();
++
++      expect(
++        visibility.isVisible,
++        isTrue,
++        reason:
++            'nothing happens while the request is in flight — the blur is '
++            'held, not obeyed, because our own map can produce one',
++      );
++
++      await window.settle();
++      await showing;
++      await pumpEventQueue();
++
++      expect(
++        visibility.isVisible,
++        isFalse,
++        reason: 'and the held blur is answered once the chain lets go',
++      );
++      expect(
++        window.calls,
++        ['show', 'focus', 'show', 'focus', 'hide'],
++        reason:
++            'a real hide against the window, not a mirror write: the second '
++            'summon completed and the dismissal followed it',
++      );
++      expect(window.visible, isFalse);
++      expect(window.visible, visibility.isVisible);
++      expect(emitted, [true, false]);
++    });
++
++    test('DW-32: two blurs inside one round trip are one dismissal — the '
++        'latch is a flag, not a queue', () async {
++      // The `focus` between the two blurs is what makes this row able to fail
++      // for the claim in its name. `_onBlur` clears `_focused` before it tests
++      // it, so a bare `blur, blur` has its second blur return at the DW-33
++      // question and never reach `_deferredBlur = true` at all — the row would
++      // then pass identically against a latch that counted, and the flag-vs-
++      // queue property would be pinned by nothing. Delivering a focus-in
++      // between them is also the realistic sequence: a user cannot lose focus
++      // twice without regaining it in between.
++      await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      final showing = visibility.show();
++      await pumpEventQueue();
++
++      window.emitEvent('blur');
++      await pumpEventQueue();
++      window.emitEvent('focus');
++      await pumpEventQueue();
++      window.emitEvent('blur');
++      await pumpEventQueue();
++
++      await window.settle();
++      await showing;
++      await pumpEventQueue();
++
++      expect(
++        window.calls.where((call) => call == 'hide'),
++        hasLength(1),
++        reason:
++            'the user turned away once; a queue of deferred blurs would issue '
++            'a second hide against a panel that is already gone',
++      );
++      expect(visibility.isVisible, isFalse);
++      expect(window.visible, visibility.isVisible);
++    });
++
++    test('DW-33: a focus regained before the latch releases drops the deferred '
++        'blur — the window manager has just handed the keyboard back', () async {
++      // DW-32's door into DW-33's defect. The round trip that suppressed the
++      // blur ends in `focus()`, which is `gtk_window_present`: it takes the
++      // keyboard back and the window says so. Dismissing on the blur that
++      // preceded that would take down a panel the compositor has just focused.
++      final emitted = <bool>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      final showing = visibility.show();
++      await pumpEventQueue();
++
++      window.emitEvent('blur');
++      await pumpEventQueue();
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      await window.settle();
++      await showing;
++      await pumpEventQueue();
++
++      expect(visibility.isVisible, isTrue);
++      expect(
++        window.calls,
++        isNot(contains('hide')),
++        reason: 'there is no dismissal left to perform',
++      );
++      expect(window.visible, isTrue);
++      expect(emitted, [true]);
++    });
++
++    test('DW-32: a latched blur whose panel is dismissed first adds no second '
++        'hide — the press that dismissed it took the latch with it', () async {
++      // Named for the mechanism that actually carries it. The obvious reading —
++      // that `_releaseDeferredBlur` re-reads `_visible` and finds it false — is
++      // not what happens: `hide()` drops the latch before it touches the
++      // mirror, so the release returns at `!_deferredBlur` and never reaches
++      // that check. Deleting the `!_visible` re-read leaves this row and the
++      // whole file green, which is recorded as control 13 rather than fixed;
++      // with the latch set, `_visible` is true by construction.
++      //
++      // What the row pins is the outcome from the user's side, which is the
++      // part that must hold however the guards are arranged: one press, one
++      // hide.
++      await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      final showing = visibility.show();
++      await pumpEventQueue();
++
++      window.emitEvent('blur');
++      await pumpEventQueue();
++
++      // A press lands while the second summon is still parked at the window.
++      final hiding = visibility.hide();
++      await pumpEventQueue();
++
++      await window.settle();
++      await Future.wait([showing, hiding]);
++      await pumpEventQueue();
++
++      expect(visibility.isVisible, isFalse);
++      expect(
++        window.calls.where((call) => call == 'hide'),
++        hasLength(1),
++        reason:
++            'the press already put the panel away, so the deferred blur has '
++            'nothing to dismiss — acting on what was true when it arrived '
++            'would issue a hide at a window somebody else is already moving',
++      );
++      expect(window.visible, visibility.isVisible);
++    });
++
++    test('DW-32: a latched blur does not survive a re-summon that moves no '
++        'mirror — the tray entry and the second launch are exactly that '
++        'request', () async {
++      // The row below covers the same rule through a `hide()` + `show()` pair,
++      // which transitions the mirror twice. This one covers the request that
++      // transitions it *not at all*, and that request is not an edge: a
++      // `show()` against an already-visible panel is AD-14's second launch and
++      // AD-12's tray entry — the very shape DW-32 exists for. `_setMirror`
++      // early-returns when the value does not change, so a latch dropped only
++      // there is not dropped here, and the release fires against the summon
++      // the user just made.
++      //
++      // The outcome is worse than a stray hide, which is why it gets its own
++      // row: `_dismiss` moves the mirror synchronously, so the `show` queued
++      // behind it reads as superseded and issues nothing. The panel does not
++      // flicker — it never appears, and no further event is coming to explain
++      // it. Both presses are spent and the user is looking at nothing.
++      final emitted = <bool>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      // AD-14's second launch, parked at the window.
++      final showing = visibility.show();
++      await pumpEventQueue();
++
++      // The user clicks away during that round trip.
++      window.emitEvent('blur');
++      await pumpEventQueue();
++
++      // And then asks for the panel again — the tray entry, or a third press.
++      // The mirror already reads true, so nothing about it moves.
++      final again = visibility.show();
++      await pumpEventQueue();
++
++      await window.settle();
++      await Future.wait([showing, again]);
++      await pumpEventQueue();
++      await window.settle();
++      await pumpEventQueue();
++
++      expect(
++        visibility.isVisible,
++        isTrue,
++        reason:
++            'the last thing the user asked for was the panel, and a blur '
++            'raised before that request cannot answer it',
++      );
++      expect(
++        window.visible,
++        isTrue,
++        reason:
++            'and the window is really up: the failure this pins is not a '
++            'mislabelled mirror but a summon that produced no panel at all',
++      );
++      expect(
++        window.calls,
++        isNot(contains('hide')),
++        reason: 'nothing was dismissed, so nothing was hidden',
++      );
+       expect(window.visible, visibility.isVisible);
++      expect(
++        emitted,
++        [true],
++        reason:
++            'and the panel never left, so no AD-18 session was discarded on '
++            'the way',
++      );
++    });
++
++    test('DW-32: a latched blur does not survive a fresh summon — a mirror '
++        'transition is a new intent, and the blur belonged to the one before '
++        'it', () async {
++      // `_releaseDeferredBlur` re-reads `_visible`, and `_visible` alone cannot
++      // tell "still the panel the blur belonged to" from "a panel the user has
++      // since re-summoned". Both read `true`. Inside one slow round trip the
++      // user can dismiss the panel and summon it again, and the release then
++      // fires against the *new* panel — worse than a stray hide, because
++      // `_dismiss` moves the mirror synchronously, so the queued show reads as
++      // superseded and issues nothing: the panel the user asked for never
++      // appears at all, and no further event is coming to explain it.
++      //
++      // Clearing the latch on every transition is what answers that, and it
++      // subsumes the mechanism of the dismissed-first row above; that row is
++      // kept because it pins the outcome from the other direction.
++      final emitted = <bool>[];
++      visibility.changes.listen(emitted.add);
++      await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      final showing = visibility.show();
++      await pumpEventQueue();
++
++      window.emitEvent('blur');
++      await pumpEventQueue();
++
++      // Two presses inside the round trip the blur was latched under: the user
++      // put the panel away and then asked for it back.
++      final hiding = visibility.hide();
++      final again = visibility.show();
++      await pumpEventQueue();
++
++      await window.settle();
++      await Future.wait([showing, hiding, again]);
++      await pumpEventQueue();
++
++      expect(
++        visibility.isVisible,
++        isTrue,
++        reason:
++            'the last thing the user asked for was the panel, and a blur '
++            'raised before that request cannot answer it',
++      );
++      expect(
++        window.visible,
++        isTrue,
++        reason:
++            'and the window really is up — a mirror reading true over a panel '
++            'the release quietly suppressed is the same defect wearing the '
++            'other face',
++      );
++      expect(window.visible, visibility.isVisible);
++      expect(emitted, [true, false, true]);
++    });
++
++    test('AD-8: a latched blur outliving dispose() moves no window — a '
++        'torn-down adapter must not dismiss anything', () async {
++      await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      final showing = visibility.show();
++      await pumpEventQueue();
++
++      window.emitEvent('blur');
++      await pumpEventQueue();
++
++      // Disposal drains the parked show, so the request resumes — and reaches
++      // its release point — with the adapter already closed.
++      //
++      // The outcome is what this pins, not a particular guard: two of them
++      // stand between the release and the window, and deleting either one alone
++      // leaves this row green. `_releaseDeferredBlur`'s own `_disposed` check
++      // returns first; behind it, `hide()` returns without touching the seam
++      // once `_disposed` is set, so the dismissal is inert even if the check is
++      // removed (control 14). Both are stated as deliberate, because a
++      // `_dismiss` refactored to reach the seam directly would need the first
++      // one and nothing here would notice its absence until then.
++      await visibility.dispose();
++      await pumpEventQueue();
++      await showing;
++
++      expect(
++        window.calls,
++        isNot(contains('hide')),
++        reason:
++            'the release point runs on the way out of a request, which is '
++            'exactly where a disposal lands; a hide issued from there would '
++            'move a real window whose mirror is frozen',
++      );
+     });
+ 
+     test('AD-15: a rejected focus-loss hide is logged and the mirror stays '
+         'false', () async {
+       await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
+       window.hideError = StateError('the window manager refused to unmap');
+ 
+       window.emitEvent('blur');
+@@ -816,6 +1465,33 @@ void main() {
+       expect(errors.single.message, contains('focus-loss hide'));
+       expect(errors.single.context, {'error_type': 'StateError'});
+     });
++
++    test('AD-15: a rejected hide from a *deferred* focus-loss is logged the '
++        'same way — one cause, one line', () async {
++      // The latch reaches `_dismiss` by a second route, and a refusal there
++      // must still name the focus loss rather than the close: an operator
++      // reading the line has to be able to tell a compositor quirk from a
++      // window the user explicitly dismissed.
++      await _settled(visibility.show(), window);
++      window.emitEvent('focus');
++      await pumpEventQueue();
++
++      final showing = visibility.show();
++      await pumpEventQueue();
++      window.emitEvent('blur');
++      await pumpEventQueue();
++      window.hideError = StateError('the window manager refused to unmap');
++
++      await window.settle();
++      await showing;
++      await pumpEventQueue();
++
++      expect(visibility.isVisible, isFalse);
++      final errors = logger.lines.where((line) => line.level == 'error');
++      expect(errors, hasLength(1));
++      expect(errors.single.message, contains('focus-loss hide'));
++      expect(errors.single.context, {'error_type': 'StateError'});
++    });
+   });
+ 
+   group('teardown (CAP-7)', () {
+diff --git a/test/platform/panel_visibility_live_test.dart b/test/platform/panel_visibility_live_test.dart
+index 26f5a2b..f0860a9 100644
+--- a/test/platform/panel_visibility_live_test.dart
++++ b/test/platform/panel_visibility_live_test.dart
+@@ -59,6 +59,31 @@ void main() {
+         'what runs instead is the adapter driven from a fake close event in '
+         'test/infrastructure/panel/window_manager_panel_visibility_test.dart '
+         'and a source pin on the flag in '
+-        'test/architecture/composition_wiring_test.dart.',
++        'test/architecture/composition_wiring_test.dart. '
++        'Reconciling the window events added two more '
++        'claims of the same kind, and this container can observe neither. '
++        'First, DW-33: that a window manager with focus-stealing prevention '
++        'maps the panel without handing it the keyboard and the panel stays '
++        'up. The adapter now answers a focus-out only when a focus-in first '
++        'said the window ever held the keyboard, and only a real compositor '
++        'can produce the map-without-focus that tells the two apart. Second, '
++        'DW-32: that clicking away during a second summon of an '
++        'already-visible panel dismisses it once that round trip ends. The '
++        'blur is latched while a request of ours is outstanding and '
++        'reconsidered when the request chain lets go, so what is owed is that '
++        'a real click-away really does arrive in that order and really is '
++        'answered afterwards. Third, the same requirement seen from the other '
++        'side: that a deiconified panel is handed the keyboard again before '
++        'any focus-out reaches it. The adapter forgets the keyboard whenever '
++        'the mirror goes to false and does not restore it when the panel comes '
++        'back, so where a window manager deiconifies without focusing, the '
++        'restored panel cannot answer a click-away until the user clicks into '
++        'it first. Group C above observes a '
++        'focus-loss hide from a panel that is already settled and already '
++        'focused, so a completed run of it settles neither of these; the same '
++        'boundary is written up under "Not covered here" in '
++        'test/platform/runtime-observation-checklist.md. Nothing is added to '
++        'that procedure for them, for the reason DW-12 added nothing: a new '
++        'entry renumbers every citation below it.',
+   );
+ }
+diff --git a/test/platform/runtime-observation-checklist.md b/test/platform/runtime-observation-checklist.md
+index 0c64020..6ca6ddb 100644
+--- a/test/platform/runtime-observation-checklist.md
++++ b/test/platform/runtime-observation-checklist.md
+@@ -636,6 +636,24 @@ They are listed so nobody assumes a completed run of this file settles them.
+   the close control, so do not read it as covering that. The claim lives in
+   **`test/platform/panel_visibility_live_test.dart`**; do not add a step for it
+   here.
++- **A summon that never gets the keyboard, and a click-away during a second
++  summon (DW-32, DW-33).** That a window manager with focus-stealing
++  prevention maps the panel *without* handing it the keyboard and the panel
++  nonetheless stays up — the adapter answers a focus-out only when a focus-in
++  first said the window ever held the keyboard — and that clicking away during a
++  second summon of an already-visible panel dismisses it once that round trip
++  ends, rather than the blur being swallowed by the request in flight. Group C
++  above observes the focus-loss dismissal from a panel that is already settled
++  and already focused, which is neither of those situations, so a completed run
++  of it settles neither claim. A third claim of the same kind rides with them:
++  that a *deiconified* panel is handed the keyboard again before any focus-out
++  reaches it. The adapter forgets the keyboard whenever the mirror goes to
++  false, a minimize included, and does not restore it when the panel comes
++  back — only a real focus-in does. Where the window manager deiconifies
++  without focusing, the restored panel cannot answer a click-away until the
++  user first clicks into it. All three live in
++  **`test/platform/panel_visibility_live_test.dart`**; do not add an entry for
++  them here.
+ - **The desktop entries (DW-87).** Installing the entries, the compositor
+   associating the registered app id with the installed file, the bind surviving
+   *because of* that association, autostart at login, and a manual launch beside
+diff --git a/test/platform/window_manager_panel_window_test.dart b/test/platform/window_manager_panel_window_test.dart
+index 0151c30..0911906 100644
+--- a/test/platform/window_manager_panel_window_test.dart
++++ b/test/platform/window_manager_panel_window_test.dart
+@@ -10,9 +10,11 @@ import 'package:window_manager/window_manager.dart';
+ /// whether the real seam reaches the plugin at all. Two claims live only here:
+ /// that `show` is **two** channel calls rather than one (the `isMinimized`
+ /// pre-hop that makes an unserialised `hide` able to overtake it), and that
+-/// `show`/`hide`/`blur`/`close` reach Dart through the untyped `onWindowEvent`
+-/// hook, which is the only route `window_manager 0.5.2` offers for the first
+-/// two and the route the visibility adapter answers `close` from (DW-12).
++/// `show`/`hide`/`focus`/`blur`/`close` reach Dart through the untyped
++/// `onWindowEvent` hook, which is the only route `window_manager 0.5.2` offers
++/// for the first two, the route the visibility adapter answers `close` from
++/// (DW-12), and the route `focus` takes to the adapter's keyboard flag, without
++/// which no `blur` is ever answered (DW-33).
+ ///
+ /// Needs a Flutter binding — a mocked method channel is the only way to reach
+ /// `windowManager`, which is a singleton behind a private channel. Hence
+@@ -84,34 +86,37 @@ void main() {
+     expect(platformCalls, ['hide']);
+   });
+ 
+-  test(
+-    'AD-8: show, hide, blur and close all reach events through onWindowEvent',
+-    () async {
+-      final received = <String>[];
+-      window.events.listen(received.add);
++  test('AD-8: show, focus, blur, hide and close all reach events through '
++      'onWindowEvent', () async {
++    final received = <String>[];
++    window.events.listen(received.add);
+ 
+-      await deliverEvent('show');
+-      await deliverEvent('blur');
+-      await deliverEvent('hide');
+-      await deliverEvent('close');
+-      await pumpEventQueue();
++    await deliverEvent('show');
++    await deliverEvent('focus');
++    await deliverEvent('blur');
++    await deliverEvent('hide');
++    await deliverEvent('close');
++    await pumpEventQueue();
+ 
+-      expect(
+-        received,
+-        ['show', 'blur', 'hide', 'close'],
+-        reason:
+-            'WindowListener declares no onWindowShow/onWindowHide and the '
+-            'dispatch map has no entry for either, so the untyped hook is the '
+-            'only route to the two events the mirror is reconciled from. '
+-            '`close` is here for a different reason (DW-12): the dispatch map '
+-            'does carry it, but the visibility adapter answers it from this '
+-            'stream, and a forwarder narrowed to the names above would leave a '
+-            'dismissed panel on screen with every binding-free suite green — '
+-            'setPreventClose(true) means GTK will not take the toplevel down '
+-            'either, so nothing else would notice',
+-      );
+-    },
+-  );
++    expect(
++      received,
++      ['show', 'focus', 'blur', 'hide', 'close'],
++      reason:
++          'WindowListener declares no onWindowShow/onWindowHide and the '
++          'dispatch map has no entry for either, so the untyped hook is the '
++          'only route to the two events the mirror is reconciled from. '
++          '`close` is here for a different reason (DW-12): the dispatch map '
++          'does carry it, but the visibility adapter answers it from this '
++          'stream, and a forwarder narrowed to the names above would leave a '
++          'dismissed panel on screen with every binding-free suite green — '
++          'setPreventClose(true) means GTK will not take the toplevel down '
++          'either, so nothing else would notice. `focus` is here for a third '
++          'reason (DW-33): the adapter dismisses on `blur` only when a '
++          '`focus` first said the window held the keyboard, so a forwarder '
++          'that dropped it would not misreport the panel — it would stop '
++          'CAP-14 dismissing it at all',
++    );
++  });
+ 
+   test('AD-8: a disposed seam makes no further window calls', () async {
+     await window.dispose();
