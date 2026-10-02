@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 milestone: v1.0
 status: Awaiting next milestone
 stopped_at: Phase 02 complete — all phases complete
-last_updated: "2026-10-02T16:24:00.583Z"
+last_updated: "2026-10-02T19:08:31.427Z"
 last_activity: 2026-10-02
-last_activity_desc: "Completed quick task 261002-cdz: Keep correction panel above windows on KDE Wayland; preserve taskbar and rebuild verified local AppImage"
-state_head: 36d91b9b0afaf88b31db4b3d8dca5bb75effb0d9
+last_activity_desc: "Completed quick task 261002-gk8: Select and copy correction and error text with mouse, keyboard, and right-click"
+state_head: 902a7cd5c7d8792b737ec191c2286efe145da4f6
 progress:
   total_phases: 2
   completed_phases: 2
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-26 after v1.0)
 Phase: Milestone v1.0 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-02 - Completed quick task 261002-cdz: Keep correction panel above windows on KDE Wayland; preserve taskbar and rebuild verified local AppImage
+Last activity: 2026-10-02 - Completed quick task 261002-gk8: Select and copy correction and error text with mouse, keyboard, and right-click
 
 ## Performance Metrics
 
@@ -251,6 +251,7 @@ None yet.
 | 261002-bb8 | Support Ctrl+Shift+tilde and all standard punctuation hotkeys | 2026-10-02 | d27914d | Verified | [261002-bb8-fix-ctrl-shift-tilde-hotkey-capture-and-](./quick/261002-bb8-fix-ctrl-shift-tilde-hotkey-capture-and-/) |
 | 261002-cgz | First suggestion preserves wording with grammar and native phrasing fixes; second Casual; third Short | 2026-10-02 | 80efc0c | Needs Review | [261002-cgz-make-the-first-correction-preserve-wordi](./quick/261002-cgz-make-the-first-correction-preserve-wordi/) |
 | 261002-cdz | Keep correction panel above windows on KDE Wayland; preserve taskbar and rebuild verified local AppImage | 2026-10-02 | 36d91b9 | Needs Review | [261002-cdz-keep-the-correction-panel-above-other-wi](./quick/261002-cdz-keep-the-correction-panel-above-other-wi/) |
+| 261002-gk8 | Select and copy correction and error text with mouse, keyboard, and right-click | 2026-10-02 | 902a7cd | Verified | [261002-gk8-select-and-copy-correction-and-error-tex](./quick/261002-gk8-select-and-copy-correction-and-error-tex/) |
 
 ### Roadmap Evolution
 

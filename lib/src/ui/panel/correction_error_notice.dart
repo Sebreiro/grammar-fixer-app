@@ -42,7 +42,7 @@ class CorrectionErrorNotice extends StatelessWidget {
           // The bigger of the panel's two messages should not be the quieter.
           Semantics(
             liveRegion: true,
-            child: Text(
+            child: SelectableText(
               message,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.error,

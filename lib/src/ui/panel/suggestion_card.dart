@@ -160,20 +160,27 @@ class SuggestionCard extends StatelessWidget {
                               ),
                             ),
                           Flexible(
-                            child: Text(
-                              copyStatusText,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: copyFailure == null
-                                    ? null
-                                    : theme.colorScheme.error,
-                              ),
-                            ),
+                            child: copyFailure == null
+                                ? Text(
+                                    copyStatusText,
+                                    style: theme.textTheme.bodySmall,
+                                  )
+                                : SelectableText(
+                                    copyStatusText,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.error,
+                                    ),
+                                  ),
                           ),
                         ],
                       ),
                     ),
                   ),
-                Text(text),
+                if (actionable)
+                  SelectableText(text, onTap: selected ? null : onSelect)
+                else
+                  // A streamed partial is not the authoritative correction.
+                  Text(text),
               ],
             ),
           ),
