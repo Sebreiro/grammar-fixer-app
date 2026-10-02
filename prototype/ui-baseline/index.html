@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hotkey Grammar Corrector — current UI sample</title>
+<link rel="stylesheet" href="styles.css">
+<script defer src="fixtures.js"></script>
+<script defer src="state.js"></script>
+<script defer src="app.js"></script>
+</head>
+<body>
+<header class="review-header">
+<h1>Current UI baseline</h1>
+<p>Interactive sample of the existing Flutter UI. All correction, clipboard, settings, history and desktop effects are simulated in memory. No real keys, native clipboard, files or services are used.</p>
+<a href="../../docs/UI_UX_REFERENCE.md">Source and UI/UX reference</a>
+</header>
+<main class="review-layout">
+<section class="window" aria-label="Hotkey Grammar Corrector">
+<div id="panel" class="panel">
+<button id="open-settings" class="settings-toggle" aria-label="Open settings" title="Open settings">⚙</button>
+<div class="panel-content">
+<section class="original-pane">
+<label for="editor">Your text</label>
+<textarea id="editor" spellcheck="false"></textarea>
+<button id="correct" title="Correct (Ctrl+Enter)">Correct</button>
+</section>
+<section id="suggestions" class="suggestions-pane" tabindex="0" aria-label="Suggestions">
+<p id="correction-announcement" class="screen-reader-only" role="status" aria-atomic="true"></p>
+<p id="correction-status" role="status"></p>
+<div id="correction-error" class="error" hidden><p id="error-message"></p><button id="retry">Retry</button></div>
+<div id="cards"></div>
+</section>
+</div>
+</div>
+<section id="settings" class="settings" hidden>
+<header class="settings-header"><button id="back" aria-label="Back">←</button><h2>Settings</h2></header>
+<p id="settings-announcement" class="screen-reader-only" role="status" aria-atomic="true"></p>
+<div class="notices">
+<div id="settings-failure" class="error" hidden><p id="settings-error-message"></p></div>
+<p id="settings-pending" role="status" hidden>Applying your change…</p>
+</div>
+<div class="settings-form">
+<fieldset id="settings-controls">
+<label for="close-behavior">When closing the window</label>
+<select id="close-behavior"><option value="closeToTray">Close to tray</option><option value="quit">Quit app</option></select>
+<section>
+<div id="hotkey-status"></div>
+<label id="shortcut-label" for="capture">Shortcut</label>
+<button id="capture" class="secondary" type="button">Ctrl+Shift+G</button>
+<p id="capture-feedback" class="helper">Click to record a shortcut.</p>
+<p id="current-shortcut-hint" class="helper">Current shortcut: Ctrl+Shift+G</p>
+<button id="keep-shortcut" class="secondary">Keep current</button>
+<button id="apply-shortcut">Apply</button>
+</section>
+<section>
+<fieldset><legend>AI provider</legend>
+<label class="choice"><input type="radio" name="provider" value="claude-agent-sdk">Claude Agent SDK (Claude Code)</label>
+<label class="choice"><input type="radio" name="provider" value="openai-compatible">OpenAI-compatible (via URL)</label>
+<label class="choice" id="custom-provider" hidden><input type="radio" name="provider" value="sample-local">sample-local</label>
+</fieldset>
+<fieldset id="preset-section"><legend>Preset</legend><div id="preset-choices"></div></fieldset>
+<p id="sdk-notice">Uses your Claude Code sign-in on this computer.</p>
+</section>
+<section id="compatible-section" hidden>
+<p id="provider-setup-notice">Save the URL and model to activate this provider. Your current provider stays active until then.</p>
+<label for="base-url">Base URL</label><input id="base-url" type="text" autocomplete="off" spellcheck="false">
+<label for="model">Model</label><input id="model" type="text" autocomplete="off" spellcheck="false">
+<p id="model-required" class="warning" hidden>Required</p>
+<p id="provider-warning" class="helper warning" hidden>Provider settings changed while you were editing. Saving will replace those changes with your draft.</p>
+<p id="url-error" class="warning"></p>
+<button id="save-provider">Save provider settings</button>
+</section>
+<section id="key-section" hidden>
+<label for="api-key">API key</label><input id="api-key" type="password" autocomplete="off" spellcheck="false">
+<p class="helper">Saved to your system keyring, or to config if the keyring is unavailable. Leave blank to keep the existing key.</p>
+<button id="save-key">Save API key</button><p id="key-saved" role="status"></p>
+<p id="key-source">API key source: None</p>
+<p id="key-plaintext" class="helper" hidden>This API key is stored as plaintext in config.json. Move it to your system keyring or environment.</p>
+</section>
+<section id="prompt-section">
+<label for="prompt">Correction prompt</label><textarea id="prompt" spellcheck="false"></textarea>
+<p class="helper">Applies to the active preset. The app adds the required response format automatically.</p>
+<p id="prompt-warning" class="helper warning" hidden>The correction prompt changed while you were editing. Saving will replace that change with your draft.</p>
+<p id="prompt-required" class="warning" hidden>Required</p>
+<button id="save-prompt">Save prompt</button>
+</section>
+<section><label for="log-size">Log file size limit</label>
+<select id="log-size"><option value="1">1 MiB</option><option value="2" id="custom-log-size" hidden>2 MiB</option><option value="5">5 MiB</option><option value="10">10 MiB</option></select>
+</section>
+</fieldset>
+</div>
+</section>
+<div id="hidden-window" class="hidden-window" hidden><p id="visibility-message"></p></div>
+</section>
+<aside class="scenarios" aria-label="Sample scenario controls">
+<h2>Sample scenarios</h2>
+<p>Review controls below are outside the app. Reload to reset every sample effect.</p>
+<label for="theme">Appearance</label>
+<select id="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
+<label for="correction-outcome">Correction outcome</label>
+<select id="correction-outcome"><option value="success">Complete</option><option value="error">Mid-stream failure</option><option value="timeout">Timeout</option></select>
+<label for="copy-outcome">Copy outcome</label>
+<select id="copy-outcome"><option value="success">Success</option><option value="failure">Failure</option></select>
+<div id="extra-scenarios">
+<label for="settings-outcome">Settings mutation outcome</label>
+<select id="settings-outcome"><option value="success">Success</option><option value="failure">Failure</option><option value="pending">Hold pending</option></select>
+<div class="scenario-actions"><button id="resolve-settings" class="secondary">Complete pending</button><button id="settings-retry" class="secondary" hidden>Repeat failed action (sample)</button></div>
+<label for="clipboard-input">Clipboard on fresh summon</label>
+<select id="clipboard-input"><option value="text">Sample text</option><option value="empty">Empty</option><option value="nontext">Non-text</option><option value="failure">Read failure</option></select>
+<label for="hotkey-scenario">Desktop shortcut state</label>
+<select id="hotkey-scenario">
+<option value="x11">X11 bound</option><option value="x11-different">X11 effective differs</option>
+<option value="wayland">Wayland desktop wording</option><option value="wayland-unknown">Wayland no description</option>
+<option value="not-requested">Not requested</option><option value="retained">Refused; old binding retained</option>
+<option value="unavailable">Mechanism unavailable</option><option value="refused">Refused; try another key</option>
+<option value="revoked">Revoked; rebind</option>
+</select>
+<label for="key-source-scenario">API key source</label>
+<select id="key-source-scenario"><option>None</option><option>System keyring</option><option>Environment</option><option>Config file</option></select>
+<div class="scenario-actions">
+<button id="external-config" class="secondary">External config edit</button>
+<button id="custom-config" class="secondary">Custom provider / log size</button>
+</div>
+<h3>Sample window actions</h3>
+<div class="scenario-actions">
+<button data-window="summon" class="secondary">Summon / toggle</button>
+<button data-window="dismissed" class="secondary">Dismiss</button>
+<button data-window="iconified" class="secondary">Minimize</button>
+<button data-window="focusLost" class="secondary">Focus loss</button>
+<button data-window="restore" class="secondary">Native restore</button>
+<button data-window="tray" class="secondary">Tray open</button>
+<button data-window="close" class="secondary">Native close</button>
+<button data-window="reset" class="secondary">Reset sample</button>
+</div>
+<p id="window-status" role="status">shown · panel</p>
+<p id="committed-status" role="status"></p>
+</div>
+<h3>Sample clipboard output</h3>
+<pre id="clipboard-output" aria-live="polite">Nothing copied.</pre>
+<p id="sample-effects" role="status">No sample history yet.</p>
+</aside>
+</main>
+</body>
+</html>

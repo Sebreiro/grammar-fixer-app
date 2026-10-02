@@ -1,0 +1,30 @@
+{
+  "group": "all",
+  "passed": [
+    "CAP-3 whitespace blocks submission",
+    "CAP-3/5 edited input streams before final results; partial guards",
+    "CAP-11 scoped digits select without copying; repeat keeps selection",
+    "CAP-14 exact sample copy keeps panel open; failed copy inline",
+    "CAP-13 Retry uses submitted input after editing",
+    "CAP-8 pending survives Back/reopen and committed setting changes only on success",
+    "CAP-8 failure preserves old value, unrelated success retains failure, Retry repeats action",
+    "CAP-8 compatible setup remains draft; URL guard; prompt/model/provider activate together",
+    "API key stays transient; successful save clears draft; source notice reachable",
+    "CAP-8 external edits update clean drafts; dirty prompt preserved with warning; stale save rejected",
+    "CAP-12 binding authority does not substitute a preference for desktop facts",
+    "Shortcut capture scopes Escape and refuses unsupported keys without losing draft",
+    "CAP-2/14 restore keeps settings/session; explicit summon returns to panel; dismissal seeds blank fixture",
+    "Hidden sample correction completes into structured history",
+    "Safe text stays literal; superseded runs do not overwrite newer results; repeat guards",
+    "CAP-10 long panes scroll independently and stay concurrently visible",
+    "Short/narrow frames and 200 percent text keep controls reachable; keyboard focus visible",
+    "Static relative links resolve to existing files",
+    "Light/dark panel and settings screenshots captured"
+  ],
+  "consoleErrors": [],
+  "outgoingRequests": [],
+  "nativeClipboardCalls": 0,
+  "browserStorageWrites": 0,
+  "entry": "file:///workspace/prototype/ui-baseline/index.html",
+  "browser": "153.0.8010.12"
+}

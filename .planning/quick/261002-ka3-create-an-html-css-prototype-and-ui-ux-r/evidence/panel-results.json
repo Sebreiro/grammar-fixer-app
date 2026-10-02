@@ -1,0 +1,12 @@
+{
+  "group": "panel",
+  "passed": [
+    "CAP-3 whitespace blocks submission",
+    "CAP-3/5 edited input streams before final results; partial guards",
+    "CAP-11 scoped digits select without copying; repeat keeps selection",
+    "CAP-14 exact sample copy keeps panel open; failed copy inline"
+  ],
+  "consoleErrors": [],
+  "outgoingRequests": [],
+  "nativeClipboardCalls": 0
+}
