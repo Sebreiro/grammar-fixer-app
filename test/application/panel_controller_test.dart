@@ -427,6 +427,9 @@ void main() {
 /// double of its own.
 final class _SynchronouslyThrowingVisibility implements PanelVisibility {
   @override
+  Stream<void> get closeRequests => const Stream<void>.empty();
+
+  @override
   bool get isVisible => false;
 
   @override

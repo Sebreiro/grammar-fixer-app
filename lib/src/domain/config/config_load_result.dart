@@ -13,8 +13,9 @@ final class ConfigLoadResult {
 
   final AppConfig config;
 
-  /// Human-renderable warning when the file was malformed and [config] holds
-  /// defaults. Null when the file was well-formed.
+  /// Human-renderable warning when defaults are needed or saved inline prompts
+  /// could not migrate to text files. A migration failure keeps the loaded
+  /// config. Null when loading and any required migration succeed.
   final String? warning;
 
   /// Safe application-authored text for the daemon log when [warning] includes

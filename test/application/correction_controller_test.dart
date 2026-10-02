@@ -961,9 +961,18 @@ void main() {
       expect(harness.repository.saveAttempts, isEmpty);
       expect(harness.state.status, equals(CorrectionStatus.idle));
       expect(harness.state.submittedText, isNull);
-      expect(harness.logger.lines.single.level, equals('info'));
       expect(
-        harness.logger.lines.single.message,
+        harness.logger.lines
+            .where((line) => line.message != 'the correction failed')
+            .single
+            .level,
+        equals('info'),
+      );
+      expect(
+        harness.logger.lines
+            .where((line) => line.message != 'the correction failed')
+            .single
+            .message,
         contains('empty editor'),
         reason:
             'this line is the only thing that tells an operator why a '
@@ -1556,7 +1565,13 @@ void main() {
         equals(CorrectionFailureKind.malformedResponse),
       );
       expect(record.suggestions, isEmpty);
-      expect(harness.logger.lines.single.level, equals('error'));
+      expect(
+        harness.logger.lines
+            .where((line) => line.message != 'the correction failed')
+            .single
+            .level,
+        equals('error'),
+      );
     });
 
     test('AD-3: a completion missing a register is treated the same '
@@ -1684,7 +1699,13 @@ void main() {
       expect(harness.state.failure, isNull);
       expect(harness.repository.saveAttempts, hasLength(1));
       expect(harness.repository.saved, isEmpty);
-      expect(harness.logger.lines.single.level, equals('error'));
+      expect(
+        harness.logger.lines
+            .where((line) => line.message != 'the correction failed')
+            .single
+            .level,
+        equals('error'),
+      );
 
       await harness.controller.dispose();
       expect(
@@ -1702,7 +1723,13 @@ void main() {
 
       expect(harness.state.editorText, isEmpty);
       expect(harness.state.status, equals(CorrectionStatus.idle));
-      expect(harness.logger.lines.single.level, equals('warning'));
+      expect(
+        harness.logger.lines
+            .where((line) => line.message != 'the correction failed')
+            .single
+            .level,
+        equals('warning'),
+      );
 
       harness.controller.editText('typed by hand instead');
       harness.controller.submit();
@@ -1727,14 +1754,26 @@ void main() {
       final record = harness.repository.saved.single;
       expect(record.outcome, equals(CorrectionOutcome.failed));
       expect(record.failureKind, equals(CorrectionFailureKind.providerError));
-      expect(harness.logger.lines.single.level, equals('error'));
+      expect(
+        harness.logger.lines
+            .where((line) => line.message != 'the correction failed')
+            .single
+            .level,
+        equals('error'),
+      );
     });
 
     test('CAP-2: a visibility stream error leaves the controller live for the '
         'next show, and the dismissal latch it holds intact', () async {
       harness.panel.emitChangesError(StateError('the window event failed'));
       await pumpEventQueue();
-      expect(harness.logger.lines.single.level, equals('error'));
+      expect(
+        harness.logger.lines
+            .where((line) => line.message != 'the correction failed')
+            .single
+            .level,
+        equals('error'),
+      );
 
       harness.clipboard.text = 'seeded after the stream error';
       await harness.show();
@@ -1785,7 +1824,13 @@ void main() {
       expect(harness.state.submittedText, equals('the text i submitted'));
       expect(harness.repository.saveAttempts, hasLength(1));
       expect(harness.repository.saved, isEmpty);
-      expect(harness.logger.lines.single.level, equals('error'));
+      expect(
+        harness.logger.lines
+            .where((line) => line.message != 'the correction failed')
+            .single
+            .level,
+        equals('error'),
+      );
     });
 
     test('CAP-7: a rejected save for a record that landed after the re-seed '
@@ -1809,7 +1854,13 @@ void main() {
       expect(harness.state.status, equals(CorrectionStatus.idle));
       expect(harness.state.suggestionTexts, isEmpty);
       expect(harness.state.editorText, equals('second copy'));
-      expect(harness.logger.lines.single.level, equals('error'));
+      expect(
+        harness.logger.lines
+            .where((line) => line.message != 'the correction failed')
+            .single
+            .level,
+        equals('error'),
+      );
     });
 
     test('AD-4: shutdown completes even when the pending history write '
@@ -2204,13 +2255,54 @@ void main() {
     await pumpEventQueue();
     lines.addAll(streaming.logger.lines);
 
-    expect(lines, hasLength(6), reason: 'every failure path logged once');
+    expect(
+      lines,
+      hasLength(8),
+      reason: 'every guard and terminal correction failure is logged',
+    );
+    expect(
+      lines.where((line) => line.message == 'the correction failed'),
+      hasLength(2),
+    );
     for (final line in lines) {
       final logged = '${line.message} ${line.context}';
       expect(logged, isNot(contains(secret)));
       expect(logged, isNot(contains(suggestionBody)));
     }
   });
+
+  test(
+    'CAP-13: each modeled failure is logged once with safe kind and session context',
+    () async {
+      final harness = _Harness();
+      addTearDown(harness.dispose);
+      await harness.show();
+      for (final kind in CorrectionFailureKind.values) {
+        harness.controller.submit();
+        harness.run.emit(
+          CorrectionFailed(
+            kind: kind,
+            message: 'vendor message with private payload',
+          ),
+        );
+        await pumpEventQueue();
+      }
+      final failures = harness.logger.lines
+          .where((line) => line.message == 'the correction failed')
+          .toList();
+      expect(
+        failures.map((line) => line.context?['failure_kind']),
+        CorrectionFailureKind.values.map((kind) => kind.name),
+      );
+      expect(failures.every((line) => line.context?.keys.length == 2), isTrue);
+      expect(
+        failures.every(
+          (line) => !line.context.toString().contains('private payload'),
+        ),
+        isTrue,
+      );
+    },
+  );
 
   group('what a failure tells the user, and what it tells an operator', () {
     late _Harness harness;
@@ -2318,7 +2410,14 @@ void main() {
       await pumpEventQueue();
 
       expect(
-        harness.logger.lines.single.context,
+        harness.logger.lines
+            .where(
+              (line) =>
+                  line.message ==
+                  'the provider completed with a malformed register set',
+            )
+            .single
+            .context,
         equals({
           'expected_registers': 3,
           'received_suggestions': 2,
@@ -2432,7 +2531,7 @@ void main() {
 
       expect(
         throwingLogger.attempts,
-        equals(['info', 'error', 'error', 'error']),
+        equals(['info', 'error', 'error', 'error', 'error', 'error']),
         reason:
             'the empty-submit guard, the register check, the provider throw '
             'and the refused cancel each still tried to report',
@@ -2538,6 +2637,9 @@ final class _Harness {
 /// be the port kept honestly, and a member for emitting a sequence the port
 /// forbids would be a footgun in every other row that uses it.
 final class _RepeatingVisibility implements PanelVisibility {
+  @override
+  Stream<void> get closeRequests => const Stream<void>.empty();
+
   final StreamController<PanelVisibilityState> _changes =
       StreamController<PanelVisibilityState>.broadcast();
 

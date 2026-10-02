@@ -41,13 +41,14 @@ import 'package:test/test.dart';
 /// equality also *requires* every permitted call, so dropping one in a
 /// legitimate refactor would turn a green test red for no reason. A subset
 /// check can only forbid, though, six of `main.dart`'s calls carry
-/// behaviour rather than merely being allowed — `setSkipTaskbar` is what keeps
-/// the hidden daemon out of the task switcher, and `setPreventClose` is what
-/// makes a window close a dismissal rather than a destroyed toplevel (DW-12) —
+/// behaviour rather than merely being allowed — `setSkipTaskbar(false)` allows
+/// the visible panel into the taskbar, and `setPreventClose` is what
+/// lets application policy answer Close without destroying the toplevel —
 /// so those have a presence assertion of their own alongside it.
 ///
 /// Every one of those pins was mutation-verified, each failing exactly the row
-/// named and none of them failing before the addition: deleting
+/// named and none of them failing before the addition. The original record
+/// below predates the taskbar preference change (quick task 261002-3x4): deleting
 /// `await windowManager.setSkipTaskbar(true)` from `main.dart` fails the
 /// presence row; rewriting the adapter's focus call as
 /// `final wm = windowManager; await wm.focus();` fails the adapter's
@@ -192,19 +193,22 @@ void main() {
       // The subset check above bans; it cannot require. That is deliberate —
       // equality would turn a legitimate refactor red — but it means these
       // calls, which carry behaviour rather than merely being
-      // permitted, need a pin of their own. Deleting `setSkipTaskbar(true)`
-      // otherwise leaves
-      // the whole suite green while the hidden daemon appears in the task
-      // switcher and in alt-tab, which is AD-8's promise broken in the one
-      // place a user would notice it first. Deleting
+      // permitted, need a pin of their own. The unmapped window stays absent
+      // from running-window lists; the visible window must allow a taskbar
+      // entry. Deleting
       // `setPreventClose(true)` is the same shape and worse: `on_window_close`
       // then returns a false `_is_prevent_close`, GTK destroys the toplevel,
-      // and the panel adapter's close arm issues a hide at a window that no
+      // and the application close policy reaches a window that no
       // longer exists — silently restoring exactly the defect DW-12 closed.
       final reached = _windowManagerCalls(
         File('lib/main.dart').readAsStringSync(),
       );
 
+      expect(
+        _stripComments(File('lib/main.dart').readAsStringSync()),
+        contains('windowManager.setSkipTaskbar(false)'),
+        reason: 'the visible warm panel participates in the taskbar/dock',
+      );
       expect(
         reached,
         containsAll(<String>[

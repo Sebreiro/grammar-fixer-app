@@ -731,6 +731,15 @@ final class CorrectionController {
   }
 
   void _onFailed(CorrectionFailed event, _Run run) {
+    _log(
+      () => _logger.error(
+        'the correction failed',
+        context: {
+          'session_token': run.sessionToken,
+          'failure_kind': event.kind.name,
+        },
+      ),
+    );
     final current = _isCurrent(run);
     _finish(run);
     _persist(_failedRecord(event, run));

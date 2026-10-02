@@ -60,6 +60,82 @@ double quote, a control character, `%`, `$` or a backtick. A relative
 default, as the XDG base-directory spec requires. Rerunning is idempotent, and
 each entry is staged and renamed rather than truncated in place.
 
+### Window behavior
+
+The open panel and Settings window appear in the desktop taskbar/dock. The app
+starts with its window hidden and remains available from the tray.
+
+Settings → **When closing the window** chooses **Close to tray** (the default)
+or **Quit app**. Quit waits for pending history writes and releases daemon
+resources before exiting. Hotkey dismissal and focus loss continue to hide the
+panel regardless of this preference.
+
+The same preference is stored as `"closeBehavior": "closeToTray"` or
+`"closeBehavior": "quit"` in `config.json`. Existing files without the field
+use the tray default; external edits take effect without restarting.
+
+### Correction prompts
+
+On first run the app creates a populated config at
+`${XDG_CONFIG_HOME:-~/.config}/hotkey-grammar-corrector/config.json` and writes
+its default correction prompt to `prompt-default-formal-casual-shorter.txt`
+beside it. Each preset references its own plain UTF-8 text file:
+
+```json
+{
+  "id": "default-formal-casual-shorter",
+  "providerId": "claude-agent-sdk",
+  "model": "claude-sonnet-5",
+  "systemPromptFile": "prompt-default-formal-casual-shorter.txt"
+}
+```
+
+Open that `.txt` file to read or edit the multiline prompt directly. File names
+are relative to the config directory and must name a `.txt` file beside
+`config.json`. Each preset needs its own file. You can choose a different name
+by changing `systemPromptFile`; create the file before updating the reference.
+
+You can also edit the active preset under **Settings → Correction prompt** and
+choose **Save prompt**. Settings saves to the same text file. Both surfaces stay
+in sync; saved edits apply to the next correction without restarting. The prompt
+stays paired with its preset's model and provider. Both shipped providers append
+the required `FORMAL:`, `CASUAL:`, `SHORTER:` and final `END` response format to
+each request, so your prompt can focus on grammar instructions. This does not
+rewrite your saved prompt file. A model response that ignores the format or ends
+early still appears as an inline error with **Retry**.
+
+For OpenRouter endpoints the app disables optional thinking and excludes
+reasoning from the response, so the correction stream contains the requested
+suggestions. These request options are specific to `openrouter.ai`.
+
+Existing inline `systemPrompt` strings migrate to text files when the config is
+loaded, preserving the exact prompt, model and provider. New files never replace
+unrelated existing text files. A preset must use either `systemPrompt` or
+`systemPromptFile`; remove the inline field when adding a file reference. Missing,
+unreadable or blank prompt files produce a config warning; they are not replaced
+with default text. Default files are seeded only when absent, so recreating a
+missing config also preserves an existing default prompt file.
+
+### Logs
+
+Logs are appended as JSON lines to
+`${XDG_CONFIG_HOME:-~/.config}/hotkey-grammar-corrector/logs/grammmar-corrector.log`,
+beside `config.json`. The daemon also writes diagnostics to stderr. The single
+log file defaults to a 1 MiB limit. Set `"logMaxBytes": 1048576`
+in `config.json` or choose **Log file size limit** in Settings; changes apply
+without restarting. Values must be integers of at least 1024 bytes. Before an
+entry would exceed the limit, the same file is cleared and logging starts from
+the beginning. Entries always remain complete JSON lines; an entry larger than
+the limit is reduced to a marked summary. Logs below the limit are retained
+across restarts and flushed on Quit, stop signals, and startup abort.
+If the file cannot be written, an error is reported on stderr and the daemon
+continues running.
+
+Failed corrections are logged. HTTP provider errors include the status, response
+body, and available request-id and Retry-After headers, including OpenRouter's
+429 details and errors received during streaming. Response capture is limited to
+64 KiB and marks truncation; credentials and echoed correction text are redacted.
+
 ### 3. Run the tests
 
 The binding-free suite, which is also what CI runs:

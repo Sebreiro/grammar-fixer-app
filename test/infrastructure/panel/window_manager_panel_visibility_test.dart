@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:hotkey_grammar_corrector/src/application/panel_controller.dart';
+import 'package:hotkey_grammar_corrector/src/application/panel_close_controller.dart';
+import 'package:hotkey_grammar_corrector/src/infrastructure/config/default_app_config.dart';
 import 'package:hotkey_grammar_corrector/src/domain/panel/panel_visibility.dart';
 import 'package:hotkey_grammar_corrector/src/infrastructure/panel/absent_keyboard_focus_witness.dart';
 import 'package:hotkey_grammar_corrector/src/infrastructure/panel/window_manager_panel_visibility.dart';
 import 'package:test/test.dart';
 
 import '../../fakes/fake_global_hotkey.dart';
+import '../../fakes/fake_config_store.dart';
 import '../../fakes/fake_keyboard_focus_witness.dart';
 import '../../fakes/fake_logger.dart';
 import '../../fakes/fake_panel_window.dart';
@@ -431,9 +434,41 @@ void main() {
       requestTimeout: _ampleBound,
       logger: logger,
     );
+    // Exercise the existing tray-close regressions through application policy.
+    final configStore = FakeConfigStore(current: DefaultAppConfig.build());
+    final closeController = PanelCloseController(
+      configStore: configStore,
+      visibility: visibility,
+      logger: logger,
+    );
+    addTearDown(() async {
+      await closeController.dispose();
+      configStore.dispose();
+    });
   });
 
   tearDown(() => visibility.dispose());
+
+  test(
+    'CAP-8: the adapter broadcasts close intent without choosing a policy',
+    () async {
+      final isolatedWindow = FakePanelWindow();
+      final isolated = WindowManagerPanelVisibility(
+        window: isolatedWindow,
+        focusWitness: FakeKeyboardFocusWitness(),
+        requestTimeout: _ampleBound,
+        logger: logger,
+      );
+      addTearDown(isolated.dispose);
+      final first = isolated.closeRequests.first;
+      final second = isolated.closeRequests.first;
+      await _settled(isolated.show(), isolatedWindow);
+      isolatedWindow.emitEvent('close');
+      await Future.wait([first, second]);
+      expect(isolated.isVisible, isTrue);
+      expect(isolatedWindow.calls, ['show', 'focus']);
+    },
+  );
 
   group('the mirror leads (CAP-1, AD-8)', () {
     test('CAP-1: isVisible is true before show() completes — the toggle never '

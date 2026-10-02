@@ -1,11 +1,12 @@
 ---
 gsd_state_version: "1.0"
+milestone: v1.0
 status: Awaiting next milestone
 stopped_at: Phase 02 complete — all phases complete
-last_updated: "2026-09-27T23:18:00.000Z"
-last_activity: 2026-09-27
-last_activity_desc: Raised quick task 260927-l2c coverage gate to 90% for lines and branches
-state_head: 57b0c6b764aa37c3d4cd1305f3e5f082a705563a
+last_updated: "2026-10-02T14:50:58.413Z"
+last_activity: 2026-10-02
+last_activity_desc: "Completed quick task 261002-a39 follow-up: reproduced old AppImage failure, rebuilt verified AppImage in build/releases, fixed bundled SQLite loading, and removed old generated AppImages"
+state_head: 0ec708fe4f1256d551d87f8acc3b35357c67ff2b
 progress:
   total_phases: 2
   completed_phases: 2
@@ -29,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-26 after v1.0)
 Phase: Milestone v1.0 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-09-27 — Raised quick task 260927-l2c coverage gate to 90% for lines and branches
+Last activity: 2026-10-02 - Completed quick task 261002-a39 follow-up: reproduced old AppImage failure, rebuilt verified AppImage in build/releases, fixed bundled SQLite loading, and removed old generated AppImages
 
 ## Performance Metrics
 
@@ -239,6 +240,14 @@ None yet.
 |---|-------------|------|--------|--------|-----------|
 | 260927-l2c | Integration tests with 90% line and branch coverage on requested CI branches | 2026-09-27 | 9759922 | Verified | [260927-l2c-write-integration-tests-for-the-project-](./quick/260927-l2c-write-integration-tests-for-the-project-/) |
 | 260927-l12 | Manual Linux binary releases with stable and branch versions | 2026-09-27 | b2a9a97 | Needs Review | [260927-l12-create-manual-github-ci-to-build-and-pub](./quick/260927-l12-create-manual-github-ci-to-build-and-pub/) |
+| 261001-cfz | API key in system keyring and exclusive AI provider settings | 2026-10-01 | e1f0ef4 | Verified | [261001-cfz-api-key-in-system-keyring-and-exclusive-](./quick/261001-cfz-api-key-in-system-keyring-and-exclusive-/) |
+| 261002-3x4 | Show open panel in taskbar and configure close to tray or quit | 2026-10-02 | aea16aa | Needs Review | [261002-3x4-show-open-panel-in-taskbar-and-configure](./quick/261002-3x4-show-open-panel-in-taskbar-and-configure/) |
+| 261002-48p | Save API key to config when the system keyring is inaccessible | 2026-10-02 | 8fbbee4 | Verified | [261002-48p-if-keyring-is-not-accessible-save-api-ke](./quick/261002-48p-if-keyring-is-not-accessible-save-api-ke/) |
+| 261002-4z2 | Fix KDE Wayland panel raising from tray and hotkey | 2026-10-02 | 22da490 | Needs Review | [261002-4z2-fix-kde-wayland-panel-raising-from-tray-](./quick/261002-4z2-fix-kde-wayland-panel-raising-from-tray-/) |
+| 261002-6ir | Configurable cyclic logs beside config and detailed provider errors including OpenRouter 429 | 2026-10-02 | 03fe3a6 | Verified | [261002-6ir-save-logs-beside-config-in-logs-and-incl](./quick/261002-6ir-save-logs-beside-config-in-logs-and-incl/) |
+| 261002-77g | Editable correction prompt text files with default seeding and synchronized Settings | 2026-10-02 | 0076bf6 | Verified | [261002-77g-make-correction-grammar-prompts-visible-](./quick/261002-77g-make-correction-grammar-prompts-visible-/) |
+| 261002-7wk | Enforce correction response format and suppress OpenRouter optional thinking | 2026-10-02 | 07f14ed | Needs Review | [261002-7wk-fix-malformed-response-when-pressing-cor](./quick/261002-7wk-fix-malformed-response-when-pressing-cor/) |
+| 261002-a39 | Deliver verified OpenRouter Ministral AppImage, repair native asset loading, and remove old AppImages | 2026-10-02 | 0ec708f | Verified | [261002-a39-fix-openrouter-ministral-stream-failure-](./quick/261002-a39-fix-openrouter-ministral-stream-failure-/) |
 
 ### Roadmap Evolution
 

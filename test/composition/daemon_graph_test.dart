@@ -6,6 +6,7 @@ import 'package:hotkey_grammar_corrector/src/application/composition/controller_
 import 'package:hotkey_grammar_corrector/src/application/composition/daemon_graph.dart';
 import 'package:hotkey_grammar_corrector/src/application/composition/port_providers.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/app_config.dart';
+import 'package:hotkey_grammar_corrector/src/domain/config/close_behavior.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/config_write_conflict.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/provider_config.dart';
 import 'package:hotkey_grammar_corrector/src/domain/correction/correction_event.dart';
@@ -25,6 +26,7 @@ import '../fakes/fake_correction_repository.dart';
 import '../fakes/fake_global_hotkey.dart';
 import '../fakes/fake_logger.dart';
 import '../fakes/fake_panel_visibility.dart';
+import '../fakes/fake_provider_key_writer.dart';
 import '../fakes/fake_tray_port.dart';
 import '../fakes/throwing_logger.dart';
 
@@ -45,6 +47,62 @@ void main() {
 
   ProviderContainer container() =>
       ProviderContainer.test(overrides: ports.overrides);
+
+  test(
+    'CAP-8: graph eagerly connects native Close to the persisted preference',
+    () async {
+      final graph = graphOver(container())..build();
+      final requests = <void>[];
+      graph.quitRequests.listen(requests.add);
+      await ports.panelVisibility.show();
+      ports.panelVisibility.requestClose();
+      await pumpEventQueue();
+      expect(ports.panelVisibility.isVisible, isFalse);
+      expect(requests, isEmpty);
+      await graph.container
+          .read(settingsControllerProvider)
+          .changeCloseBehavior(CloseBehavior.quit);
+      await ports.panelVisibility.show();
+      ports.panelVisibility.requestClose();
+      await pumpEventQueue();
+      expect(requests, hasLength(1));
+      expect(ports.panelVisibility.isVisible, isTrue);
+    },
+  );
+
+  test(
+    'AD-4: disposing graph controllers stops native Close handling',
+    () async {
+      final graph = graphOver(container())..build();
+      await graph.disposeControllers();
+      await ports.panelVisibility.show();
+      ports.panelVisibility.requestClose();
+      await pumpEventQueue();
+      expect(ports.panelVisibility.isVisible, isTrue);
+    },
+  );
+
+  test(
+    'CAP-8: persisted and external log limits reach the runtime config listener',
+    () async {
+      final limits = <int>[];
+      final graph = DaemonGraph(
+        container: container(),
+        logger: ports.logger,
+        onConfigApplied: (config) => limits.add(config.logMaxBytes),
+      )..build();
+      final settings = graph.container.read(settingsControllerProvider);
+      await settings.changeLogMaxBytes(5242880);
+      expect(ports.configStore.current.logMaxBytes, 5242880);
+      await ports.configStore.write(
+        ports.configStore.current.copyWith(logMaxBytes: 2048),
+      );
+      await pumpEventQueue();
+      expect(limits, [5242880, 2048]);
+      await graph.disposeControllers();
+      graph.dispose();
+    },
+  );
 
   group('the graph is built at startup (AD-14, AD-17)', () {
     test('AD-18: build() constructs every controller, so the first show is '
@@ -250,6 +308,24 @@ void main() {
     });
 
     test(
+      'CAP-8: the graph injects keyring saving without storing the key in config',
+      () async {
+        final writer = FakeProviderKeyWriter();
+        final graph = DaemonGraph(
+          container: container(),
+          logger: ports.logger,
+          providerKeyWriter: writer,
+        )..build();
+        final settings = graph.container.read(settingsControllerProvider);
+
+        expect(await settings.saveApiKey('private-key'), isTrue);
+        expect(writer.writes.single.apiKey, 'private-key');
+        expect(ports.configStore.writes, isEmpty);
+        await graph.disposeControllers();
+      },
+    );
+
+    test(
       'CAP-13: invalid endpoint settings show a failure without writing',
       () async {
         ports.configStore.current = _compatibleConfig;
@@ -429,6 +505,7 @@ void main() {
           'cancelling the panel visibility subscription failed',
           'cancelling the panel visibility subscription failed',
           'cancelling the hotkey activation subscription failed',
+          'cancelling the panel close subscription failed',
           'cancelling the config subscription failed',
         ],
       );

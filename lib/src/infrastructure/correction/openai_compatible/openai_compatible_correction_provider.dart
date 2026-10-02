@@ -1,18 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../../../domain/correction/correction_event.dart';
 import '../../../domain/correction/correction_provider.dart';
 import '../../../domain/correction/preset.dart';
 import '../../../domain/correction/suggestion_register.dart';
+import '../../../domain/logger.dart';
 import '../shared/register_tagged_stream_parser.dart';
+import 'chat_completion_request.dart';
 import 'chat_completion_sse_decoder.dart';
+import 'provider_error_diagnostics.dart';
 
 /// One explicitly configured Chat Completions endpoint, with no fallback.
 final class OpenAiCompatibleCorrectionProvider implements CorrectionProvider {
   const OpenAiCompatibleCorrectionProvider({
     required this.baseUrl,
+    required this.logger,
     this.apiKey,
     this.resolveApiKey,
     this.timeout = const Duration(seconds: 60),
@@ -22,6 +27,7 @@ final class OpenAiCompatibleCorrectionProvider implements CorrectionProvider {
   static const baseUrlSettingsKey = 'baseUrl';
 
   final String baseUrl;
+  final Logger logger;
   final String? apiKey;
   final Future<String?> Function()? resolveApiKey;
   final Duration timeout;
@@ -33,6 +39,7 @@ final class OpenAiCompatibleCorrectionProvider implements CorrectionProvider {
   }) {
     return _HttpCorrectionRun(
       baseUrl: baseUrl,
+      logger: logger,
       apiKey: apiKey,
       resolveApiKey: resolveApiKey,
       timeout: timeout,
@@ -45,6 +52,7 @@ final class OpenAiCompatibleCorrectionProvider implements CorrectionProvider {
 final class _HttpCorrectionRun {
   _HttpCorrectionRun({
     required this.baseUrl,
+    required this.logger,
     required this.apiKey,
     required this.resolveApiKey,
     required this.timeout,
@@ -71,9 +79,11 @@ final class _HttpCorrectionRun {
   }
 
   static const _maxRequestBytes = 256 * 1024;
+  static const maxErrorBodyBytes = 64 * 1024;
   static const _decoder = ChatCompletionSseDecoder();
 
   final String baseUrl;
+  final Logger logger;
   final String? apiKey;
   final Future<String?> Function()? resolveApiKey;
   final Duration timeout;
@@ -83,6 +93,12 @@ final class _HttpCorrectionRun {
   late final StreamController<CorrectionEvent> _output;
   late final StreamController<String> _content;
   StreamSubscription<String>? _decodedContent;
+  StreamSubscription<List<int>>? _errorBodySubscription;
+  final BytesBuilder _errorBody = BytesBuilder(copy: false);
+  Map<String, Object?> _failureContext = const {};
+  bool _bodyTruncated = false;
+  String? _resolvedApiKey;
+  final StringBuffer _receivedText = StringBuffer();
   StreamSubscription<CorrectionEvent>? _parsedEvents;
   HttpClient? _client;
   HttpClientRequest? _request;
@@ -116,7 +132,8 @@ final class _HttpCorrectionRun {
     try {
       final keyResolver = resolveApiKey;
       if (keyResolver != null) resolvedKey = await keyResolver();
-    } on Object {
+    } on Object catch (error) {
+      _failureContext = {'error_type': error.runtimeType.toString()};
       _emit(
         _failure(
           CorrectionFailureKind.providerUnavailable,
@@ -126,6 +143,7 @@ final class _HttpCorrectionRun {
       return;
     }
     if (_terminated) return;
+    _resolvedApiKey = resolvedKey;
     if (endpoint.host == 'api.openai.com' && (resolvedKey?.isEmpty ?? true)) {
       _emit(
         _failure(
@@ -135,7 +153,11 @@ final class _HttpCorrectionRun {
       );
       return;
     }
-    final body = _requestBody();
+    final body = ChatCompletionRequest.encode(
+      endpoint: endpoint,
+      text: text,
+      preset: preset,
+    );
     final encodedBody = utf8.encode(body);
     if (encodedBody.length > _maxRequestBytes) {
       _emit(
@@ -175,8 +197,9 @@ final class _HttpCorrectionRun {
       request.add(encodedBody);
       final response = await request.close();
       if (_terminated) return;
-      if (response.statusCode != HttpStatus.ok) {
-        _emit(_statusFailure(response.statusCode));
+      if (response.statusCode != HttpStatus.ok ||
+          response.headers.contentType?.mimeType == 'application/json') {
+        _attachErrorBody(response);
         return;
       }
       _attachDecoder(response);
@@ -187,7 +210,8 @@ final class _HttpCorrectionRun {
           'The provider took too long. Retry the correction.',
         ),
       );
-    } on Object {
+    } on Object catch (error) {
+      _failureContext = {'error_type': error.runtimeType.toString()};
       _emit(
         _failure(
           CorrectionFailureKind.providerError,
@@ -197,28 +221,96 @@ final class _HttpCorrectionRun {
     }
   }
 
-  String _requestBody() => jsonEncode({
-    'model': preset.model,
-    'messages': [
-      {'role': 'system', 'content': preset.systemPrompt},
-      {'role': 'user', 'content': text},
+  void _attachErrorBody(HttpClientResponse response) {
+    _failureContext = {
+      'http_status': response.statusCode,
+      for (final name in [
+        'retry-after',
+        'x-request-id',
+        'x-openrouter-request-id',
+      ])
+        if (response.headers[name] case final values?)
+          name: _safeBody(values.join(', ')),
+    };
+    _errorBodySubscription = response.listen(
+      (chunk) => _acceptErrorBytes(chunk, response.statusCode),
+      onDone: () => _emit(_statusFailure(response.statusCode)),
+      onError: (Object error) {
+        _failureContext = {
+          ..._failureContext,
+          'body_read_error_type': error.runtimeType.toString(),
+        };
+        _emit(_statusFailure(response.statusCode));
+      },
+    );
+  }
+
+  void _acceptErrorBytes(List<int> chunk, int status) {
+    if (_terminated) return;
+    final remaining = maxErrorBodyBytes - _errorBody.length;
+    _errorBody.add(
+      chunk.length <= remaining ? chunk : chunk.sublist(0, remaining),
+    );
+    if (chunk.length > remaining) {
+      _bodyTruncated = true;
+      _emit(_statusFailure(status));
+    }
+  }
+
+  String _safeBody(String body) => ProviderErrorDiagnostics(
+    sensitiveValues: [
+      text,
+      preset.systemPrompt,
+      apiKey ?? '',
+      _resolvedApiKey ?? '',
+      _receivedText.toString(),
+      ..._receivedText
+          .toString()
+          .split(RegExp(r'[\r\n]'))
+          .map(
+            (line) =>
+                line.replaceFirst(RegExp(r'^(FORMAL|CASUAL|SHORTER):\s*'), ''),
+          ),
     ],
-    'stream': true,
-    'temperature': 0.2,
-    'n': 1,
-    'max_tokens': 512,
-  });
+  ).sanitize(body);
+
+  void _recordStreamError(Map<String, Object?> frame) {
+    _failureContext = {
+      'http_status': HttpStatus.ok,
+      'stream_error': true,
+      'response_body': _safeBody(jsonEncode(frame)),
+    };
+  }
+
+  void _logFailure(CorrectionFailed event) {
+    try {
+      logger.error(
+        'the HTTP correction provider failed',
+        context: {
+          'provider_id': OpenAiCompatibleCorrectionProvider.providerId,
+          'failure_kind': event.kind.name,
+          'message': _safeBody(event.message),
+          ..._failureContext,
+          if (_errorBodySubscription != null)
+            'response_body': _safeBody(
+              utf8.decode(_errorBody.toBytes(), allowMalformed: true),
+            ),
+          if (_bodyTruncated) 'response_body_truncated': true,
+        },
+      );
+    } on Object {
+      // A failed diagnostic sink cannot replace the provider's failure event.
+    }
+  }
 
   void _attachParser() {
     _parsedEvents = const RegisterTaggedStreamParser()
         .parse(_content.stream)
         .listen(
           _emit,
-          onError: (Object _) => _emit(
-            _failure(
-              CorrectionFailureKind.providerError,
-              'The provider stream failed. Retry the correction.',
-            ),
+          onError: (Object error) => _onStreamFailure(
+            error,
+            'The provider stream failed. Retry the correction.',
           ),
         );
     if (_consumerPaused) _parsedEvents?.pause();
@@ -226,20 +318,30 @@ final class _HttpCorrectionRun {
 
   void _attachDecoder(HttpClientResponse response) {
     _decodedContent = _decoder
-        .decode(response)
+        .decode(response, onProviderError: _recordStreamError)
         .listen(
-          (content) => _content.add(content),
-          onError: (Object _) => _emit(
-            _failure(
-              CorrectionFailureKind.providerError,
-              'The provider returned an invalid or interrupted stream. Retry.',
-            ),
+          (content) {
+            // Diagnostics can arrive before the parser delivers its deltas.
+            _receivedText.write(content);
+            _content.add(content);
+          },
+          onError: (Object error) => _onStreamFailure(
+            error,
+            'The provider returned an invalid or interrupted stream. Retry.',
           ),
           onDone: () {
             if (!_terminated) unawaited(_content.close());
           },
         );
     if (_content.isPaused) _decodedContent?.pause();
+  }
+
+  void _onStreamFailure(Object error, String message) {
+    _failureContext = {
+      ..._failureContext,
+      'error_type': error.runtimeType.toString(),
+    };
+    _emit(_failure(CorrectionFailureKind.providerError, message));
   }
 
   void _emit(CorrectionEvent event) {
@@ -277,6 +379,7 @@ final class _HttpCorrectionRun {
 
   void _finish(CorrectionEvent event) {
     _terminated = true;
+    if (event case CorrectionFailed()) _logFailure(event);
     _output.add(event);
     unawaited(_output.close());
     unawaited(_shutdown());
@@ -294,6 +397,8 @@ final class _HttpCorrectionRun {
     _request = null;
     _client?.close(force: true);
     _client = null;
+    await _errorBodySubscription?.cancel();
+    _errorBodySubscription = null;
     await _decodedContent?.cancel();
     _decodedContent = null;
     await _parsedEvents?.cancel();
@@ -327,6 +432,12 @@ Uri? _validatedEndpoint(String rawBaseUrl) {
 }
 
 CorrectionFailed _statusFailure(int status) {
+  if (status == HttpStatus.ok) {
+    return _failure(
+      CorrectionFailureKind.providerError,
+      'The provider returned JSON instead of a correction stream. Retry.',
+    );
+  }
   if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
     return _failure(
       CorrectionFailureKind.providerUnavailable,

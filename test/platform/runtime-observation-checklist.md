@@ -797,3 +797,28 @@ Confirm before you file the results:
 ```
 Cleaning up completed (all three items)?  yes | no
 ```
+
+
+## Taskbar and native Close preference (quick task 261002-3x4)
+
+Repeat on a real X11 desktop and a real Wayland desktop with a taskbar/dock:
+
+1. Start the packaged daemon with desktop entries installed. Its hidden window must not appear in the running-window list. Summon the panel; the app should appear with its installed icon. Open Settings; the same taskbar entry stays available.
+2. Leave **When closing the window** at **Close to tray**. Close from Settings, then reopen from the tray. Close from the panel; the window and its running taskbar entry disappear while the tray daemon stays available. Reopen with the hotkey or tray; the warm window returns.
+3. Minimize the panel, then restore from its taskbar entry; the panel and its current session return.
+4. Select **Quit app**. Verify `closeBehavior` in config.json becomes `quit`. Dismiss by hotkey and by clicking away; both still hide and the daemon stays resident. Reopen and press native Close; the process exits and the tray disappears. Repeat native Close from Settings. Restart; the setting remains **Quit app**.
+5. Change `closeBehavior` in the config file between `closeToTray` and `quit` with Settings open; the field updates. Re-select **Close to tray** and verify config.json is updated. Remove the key and restart; the tray default returns.
+
+These are compositor observations; source/property tests alone do not verify the desktop's actual taskbar presentation.
+
+
+## KDE Wayland raising (quick task 261002-4z2)
+
+Record Plasma/KWin versions, session type, GTK backend, app build commit, and whether the GlobalShortcuts portal supplied activation tokens. These checks require a real KDE desktop; the private-bus tests prove delivery/order, not compositor foreground focus.
+
+1. Launch the new build once and verify it starts hidden. Open the panel from the tray, then work in another application. Choose **Open the panel** again: the same panel must reach the foreground and accept typing. Repeat with Settings showing and after tray menu replacement caused by a hotkey status update.
+2. Repeat from another focused application with the registered portal hotkey. A hidden panel must show and accept typing; a second press while the panel is visible must hide it. Clicking away must still hide it. Returning after focus loss must preserve the editor and suggestions.
+3. Minimize the panel to the taskbar and repeat both entry routes. Restoring must preserve the session. Opening from the taskbar must continue to work.
+4. Keep the daemon resident for at least ten minutes, interacting with other applications throughout, and repeat tray and hotkey summons. Record foreground focus, rather than only mapping or a successful method reply.
+5. Measure hotkey-to-visible-and-focused latency against CAP-1's 100 ms budget. Record the measuring method and distribution. The automated tests provide no latency verdict.
+6. If a summon fails, reproduce from a terminal with `WAYLAND_DEBUG=client` and inspect the activation request and actual keyboard focus. Keep token values and unrelated application text out of shared evidence. A backend that supplies no fresh token remains subject to compositor activation policy; record that absence rather than claiming a foreground pass.

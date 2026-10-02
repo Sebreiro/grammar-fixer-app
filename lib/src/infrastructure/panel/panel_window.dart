@@ -1,3 +1,5 @@
+import 'panel_activation.dart';
+
 /// The daemon's one toplevel window, as the visibility adapter needs it:
 /// three requests and the raw stream of events the window reports back.
 ///
@@ -36,7 +38,7 @@
 /// already reached. `main.dart` sets `setPreventClose(true)` at startup, and the
 /// plugin emits `close` *before* it reads that flag — so the event arrives with
 /// the toplevel **still mapped**, and `WindowManagerPanelVisibility` answers it
-/// with a real `hide()` (DW-12). A forwarder narrowed to the other six names
+/// by reporting close intent to the application (DW-12). A forwarder narrowed to the other six names
 /// would therefore leave a dismissed panel on screen, and every binding-free
 /// suite above this seam would stay green throughout — the only implementation
 /// of this interface needs a Flutter binding. What catches that narrowing is
@@ -54,7 +56,7 @@ abstract interface class PanelWindow {
   /// Raises the window and gives it focus. On Linux this is
   /// `gtk_window_present`, which **also maps a hidden toplevel** — so calling
   /// it after a superseded [show] would put the panel back on screen.
-  Future<void> focus();
+  Future<void> focus({PanelActivation? activation});
 
   /// Every event the window reports, by name. `self-focus` marks a focus-in
   /// expected from this seam's own show/present; `focus` is a user focus-in.

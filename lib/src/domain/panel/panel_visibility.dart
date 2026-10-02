@@ -97,6 +97,10 @@ abstract interface class PanelVisibility {
   ///   the next [PanelVisibilityState.shown] is judged against.
   Stream<PanelVisibilityState> get changes;
 
+  /// Native Close intent, before the application chooses hide or quit.
+  /// Broadcast; it never destroys the warm window on its own.
+  Stream<void> get closeRequests;
+
   /// Asks for the already-constructed window to be shown **and focused**.
   ///
   /// A resolved future means the request was accepted and has left the

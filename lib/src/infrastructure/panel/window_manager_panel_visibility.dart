@@ -3,6 +3,8 @@ import 'dart:async';
 import '../../domain/logger.dart';
 import '../../domain/panel/panel_visibility.dart';
 import 'keyboard_focus_witness.dart';
+import 'panel_activation.dart';
+import 'panel_activation_context.dart';
 import 'panel_window.dart';
 
 /// AD-8's [PanelVisibility], over a [PanelWindow].
@@ -53,7 +55,7 @@ import 'panel_window.dart';
 /// `minimize` and `close` cannot: nothing we call iconifies, and nothing we
 /// call produces a GTK `delete-event`. They are **structurally external**, and
 /// are therefore obeyed whatever is outstanding — a `minimize` moves the mirror
-/// straight (DW-31), a `close` puts the window away for real (DW-12).
+/// straight (DW-31), a `close` reports intent to the application close policy.
 /// `minimize` and `restore` reach Dart from the same GTK `window-state-event`
 /// handler and still land on opposite sides of this axis, which is why it cannot
 /// be read off the signal.
@@ -63,8 +65,8 @@ import 'panel_window.dart';
 /// whether the panel is up. The GTK `hide` signal only echoes our own request,
 /// whose departure was already reported with its reason. `focus` reports the
 /// keyboard, which is a different fact about the same window. `close` and `blur`
-/// do not either — they are *intents*, and this adapter answers them the only
-/// honest way, with a real `hide` through [_dismiss].
+/// do not either — they are intents. Close is forwarded to the application;
+/// blur is answered with a real `hide` through [_dismissForFocusLoss].
 ///
 /// `_reconcile` — the active-request guard — takes the echo-capable mirror
 /// claims that can add information: `show` and `restore`. Inside that set
@@ -77,8 +79,7 @@ import 'panel_window.dart';
 /// sides of the guard makes them stop doing that during one of our requests: the
 /// `minimize` is believed, the `restore` that undoes it is swallowed, and the
 /// mirror is left reading false over a window that is mapped with nothing able
-/// to correct it. `main.dart` sets `setSkipTaskbar(true)`, so the hotkey is the
-/// only route back to that panel, and against a false mirror that press resolves
+/// to correct it. The hotkey can return to that panel, and against a false mirror a press resolves
 /// to [show] rather than [hide] — so the panel stays on screen with nothing left
 /// that can put it away, while the `_focused` clear on the way down has already
 /// taken CAP-14's dismissal with it. So a believed `minimize` arms a
@@ -106,7 +107,7 @@ import 'panel_window.dart';
 ///
 /// [changes] emits **exactly on a transition of the state**, whatever caused it
 /// — and every departure is *attributed*: a requested hide is `dismissed`, and
-/// so is the `close` control because this adapter answers it with one; an
+/// so is the `close` control when its application policy requests one; an
 /// iconify is `iconified`; and CAP-14's focus-loss hide is `focusLost`. There is
 /// no fourth source. In particular there is no external unmap to attribute: the
 /// `hide` event is the GTK *widget* `hide` signal, so it can only ever be an
@@ -190,6 +191,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
     required KeyboardFocusWitness focusWitness,
     required this._requestTimeout,
     required this._logger,
+    this._activationContext,
   }) : _witness = focusWitness {
     _events = _window.events.listen(
       _onWindowEvent,
@@ -223,6 +225,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
   }
 
   final PanelWindow _window;
+  final PanelActivationContext? _activationContext;
 
   /// Answers whether a focus-out actually moved the keyboard (G-01-13).
   ///
@@ -252,6 +255,8 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
   /// `CorrectionController` is the only subscriber.
   final StreamController<PanelVisibilityState> _changes =
       StreamController<PanelVisibilityState>.broadcast();
+  final StreamController<void> _closeRequests =
+      StreamController<void>.broadcast();
 
   bool _visible = false;
   bool _disposed = false;
@@ -373,6 +378,9 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
   Stream<PanelVisibilityState> get changes => _changes.stream;
 
   @override
+  Stream<void> get closeRequests => _closeRequests.stream;
+
+  @override
   Future<void> show() {
     if (_disposed) {
       // A press can land in the teardown gap between this adapter closing and
@@ -402,7 +410,11 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
     _deferredBlur = false;
     _believedMinimize = false;
     _setMirror(PanelVisibilityState.shown);
-    return _enqueue(true, ++_intentGeneration);
+    return _enqueue(
+      true,
+      ++_intentGeneration,
+      activation: _activationContext?.take(),
+    );
   }
 
   @override
@@ -427,7 +439,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
     // The one place this is asserted. [PanelVisibilityState] is a single enum
     // on a single stream by decision, so no type can say "a departure" — and
     // every departure that arrives here arrives in a *variable*: `hide()`'s
-    // literal and both of [_dismiss]'s. The window-driven routes pass literals
+    // literal and both of [_dismissForFocusLoss]'s. The window-driven routes pass literals
     // straight to [_setMirror] and are not covered; see its doc for why that is
     // the boundary rather than an omission.
     assert(
@@ -445,6 +457,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
     _deferredBlur = false;
     _believedMinimize = false;
     _setMirror(departure);
+    _activationContext?.take();
     return _enqueue(false, ++_intentGeneration);
   }
 
@@ -465,6 +478,10 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
       await _events.cancel();
     });
     await _guard('closing the panel visibility change stream', _changes.close);
+    await _guard(
+      'closing the panel close-request stream',
+      _closeRequests.close,
+    );
     await _guard('disposing the panel window', _window.dispose);
     await _guard('disposing the keyboard focus witness', _witness.dispose);
   }
@@ -472,8 +489,12 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
   /// Queues [intended] behind every request already issued, and returns the
   /// caller's own future — a rejection reaches the caller, and the chain
   /// survives it.
-  Future<void> _enqueue(bool intended, int generation) {
-    final result = _queue.then((_) => _apply(intended, generation));
+  Future<void> _enqueue(
+    bool intended,
+    int generation, {
+    PanelActivation? activation,
+  }) {
+    final result = _queue.then((_) => _apply(intended, generation, activation));
     _queue = result.catchError((Object _) {});
     return result;
   }
@@ -485,7 +506,11 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
   /// link in `_queue`, so a single bare `await _window.…()` re-parks every
   /// request behind it forever and mechanism four is silently gone, with no
   /// analyzer complaint and nothing but a hung panel to say so.
-  Future<void> _apply(bool intended, int generation) async {
+  Future<void> _apply(
+    bool intended,
+    int generation,
+    PanelActivation? activation,
+  ) async {
     if (_disposed) {
       return;
     }
@@ -530,7 +555,11 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
       // Branched on for the same reason the hide arm is, and more so: this is
       // the last call in the method, so it is the one a fifth round trip would
       // be appended after.
-      if (!await _answered('focus', _window.focus, generation)) {
+      if (!await _answered(
+        'focus',
+        () => _window.focus(activation: activation),
+        generation,
+      )) {
         return;
       }
     } finally {
@@ -715,35 +744,8 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
         // the call's generation is still available.
         break;
       case 'close':
-        // DW-12: a close is a dismissal, not an exit — the same intent CAP-14
-        // gives a focus loss, so it gets the same answer.
-        //
-        // Not `_reconcile(false)`, and that is the whole change.
-        //
-        // What keeps the toplevel alive is `main.dart`'s
-        // `setPreventClose(true)`, and nothing else: `on_window_close` returns
-        // `_is_prevent_close`, and returning TRUE is what suppresses GTK's
-        // default `delete-event` handler — the one that destroys the widget
-        // (`window_manager-0.5.2/linux/window_manager_plugin.cc:967-971`).
-        // The emit-before-return ordering in that function guarantees nothing
-        // on its own, because `_emit_event` is
-        // `fl_method_channel_invoke_method` (`:959-965`) — an asynchronous
-        // channel invoke, so this arm runs a main-loop turn later. With the
-        // flag false the toplevel would already be destroyed by then.
-        //
-        // So: the event arrives with the toplevel still mapped *because the
-        // flag is set*, and a mirror written to `false` here would be a lie
-        // about a window that is still on screen. The arm has to actually put
-        // the window away — and it is correct only while `main.dart` sets that
-        // flag, which `test/architecture/hidden_window_test.dart`'s presence
-        // row and `composition_wiring_test.dart`'s DW-12 row are what hold.
-        //
-        // No `_outstanding` guard, deliberately: `close` is a GTK
-        // `delete-event`, and this adapter's only platform calls are `show`,
-        // `hide` and `focus`, so a close can never be an echo of ours. It is
-        // structurally external, and `minimize` below now sits on that same
-        // side for the same reason (DW-31).
-        _dismiss('close', PanelVisibilityState.dismissed);
+        // PreventClose keeps GTK alive until the application hides or drains it.
+        _closeRequests.add(null);
       case 'minimize':
         // Structurally external, exactly as `close` is: `minimize` comes from a
         // GTK `window-state-event` and nothing this adapter calls iconifies, so
@@ -753,10 +755,9 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
         // during a request of ours (DW-31).
         //
         // Nothing else would report it: `gtk_window_iconify` emits no GTK
-        // `hide` signal. And an iconified panel is not merely mislabelled —
-        // `main.dart` calls `setSkipTaskbar(true)` on this toplevel, so there
-        // is no task-bar entry to click it back from and the hotkey is the only
-        // way to reach it. With the mirror still reading `true`, that press is
+        // `hide` signal. An iconified panel is still available from the taskbar,
+        // and its mirror must also allow the hotkey to summon it. With the
+        // mirror still reading `true`, that press is
         // spent issuing a `hide` against a window nobody can see, and the user
         // has to press twice to get the panel back.
         //
@@ -768,8 +769,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
         // `false` over a window that is mapped — *permanently*, because
         // the departure path also clears `_focused` and the `focus` arm's own
         // `_visible` guard can never re-arm it over a false mirror, so CAP-14's
-        // dismissal was dead for that panel's life. With `setSkipTaskbar(true)`
-        // the hotkey is the only route back, and against a false mirror that
+        // dismissal was dead for that panel's life. Against a false mirror a
         // press resolves to `show()` rather than `hide()`: the panel is already
         // on screen, so the press changes nothing the user can see and leaves
         // them with a window nothing can put away. Hence the latch armed below
@@ -918,8 +918,9 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
   /// past here depending on the latch. What is invariant is the *route*. An arm
   /// writes the mirror for one of exactly two reasons: it reports a state the
   /// window has already reached (`show`, `restore`, `minimize`), or it
-  /// answers an intent with a real `hide` through [_dismiss] (`close`, and a
-  /// `blur` that gets past [_onBlur]'s three questions). This method is the
+  /// answers a `blur` intent with a real `hide` through [_dismissForFocusLoss]
+  /// after [_onBlur]'s three questions. Close intent goes to the application
+  /// policy instead. This method is the
   /// guard on the first route, minus the arms that cannot be echoes of ours. It
   /// is not a judgement about which arms deserve tidying.
   ///
@@ -1028,7 +1029,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
       _deferredBlur = true;
       return;
     }
-    _dismiss('focus-loss', PanelVisibilityState.focusLost);
+    _dismissForFocusLoss();
   }
 
   /// The witness's recording, with the AD-15 backstop around it — the write
@@ -1111,7 +1112,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
   /// negative-control record measures that pair as a control of its own.
   ///
   /// `_disposed` is the same shape: [_hide] returns without touching the window
-  /// once the adapter is closed, so the [_dismiss] below is already inert by
+  /// once the adapter is closed, so the [_dismissForFocusLoss] below is already inert by
   /// the time it would matter. It is stated here so a later `_dismiss` that
   /// reached the seam directly would not silently move a real window on the
   /// teardown path.
@@ -1123,7 +1124,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
   /// the event ordering is uncertain.
   ///
   /// The question is asked here as well as in [_onBlur] because this method
-  /// reaches [_dismiss] past [_onBlur]'s questions, not through them. Without
+  /// reaches [_dismissForFocusLoss] past [_onBlur]'s questions, not through them. Without
   /// it the suppression would be half wired: a grab firing during one of our
   /// round trips — AD-14's second launch and AD-12's tray entry are both full
   /// round trips against a mapped, focused window — would latch a blur that
@@ -1144,46 +1145,16 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
     if (_keyboardStillHere()) {
       return;
     }
-    _dismiss('focus-loss', PanelVisibilityState.focusLost);
+    _dismissForFocusLoss();
   }
 
-  /// Puts the panel away on the window's own initiative, and reduces a refusal
-  /// to a log line.
-  ///
-  /// Three call sites, two causes. Both causes mean "the user is done with this
-  /// window" — a focus loss (CAP-14) and a close (DW-12) — and the focus loss
-  /// reaches here by two routes: [_onBlur] when nothing of ours is outstanding,
-  /// and [_releaseDeferredBlur] when a blur latched during a request is
-  /// reconsidered afterwards (DW-32). The deferred route is the same cause and
-  /// carries the same [cause] string deliberately: to whoever reads the log, a
-  /// dismissal delayed by one round trip is still a focus loss, and splitting
-  /// it would put a third vocabulary in front of them for no difference they
-  /// can act on.
-  ///
-  /// All three want the identical thing: a real `hide`, issued without awaiting
-  /// it, whose rejection must not
-  /// escape into the zone as an uncaught error in a daemon whose job is to stay
-  /// up. The mirror has already led inside [_hide], so a refusal costs the line
-  /// and nothing else.
-  ///
-  /// [cause] is a parameter rather than a flattened single message because the
-  /// two are different events to whoever reads the line: a window manager that
-  /// refuses the focus-loss hide is a compositor quirk, and one that refuses the
-  /// close hide leaves a toplevel on screen that the user explicitly dismissed.
-  ///
-  /// [departure] travels beside it and is **not** the same fact. [cause] is the
-  /// operator's vocabulary — which of two log lines to read — while [departure]
-  /// is the session's, and the two do not partition the call sites the same way:
-  /// both focus-loss routes carry one cause and one departure, while the `close`
-  /// arm's cause is its own and its departure is the one an ordinary [hide]
-  /// carries. Collapsing them into one parameter would tie the log wording to
-  /// AD-18's rule.
-  void _dismiss(String cause, PanelVisibilityState departure) {
+  /// A failed focus-loss hide must not escape into the daemon's root zone.
+  void _dismissForFocusLoss() {
     unawaited(
-      _hide(departure).catchError(
+      _hide(PanelVisibilityState.focusLost).catchError(
         (Object error) => _log(
           () => _logger.error(
-            'the window rejected the $cause hide',
+            'the window rejected the focus-loss hide',
             context: _errorContext(error),
           ),
         ),
@@ -1207,7 +1178,7 @@ final class WindowManagerPanelVisibility implements PanelVisibility {
   /// one — but it does **not** see every departure, and earlier prose here
   /// claimed it did. It covers the routes that carry a departure in a
   /// *variable*, which is every caller-side request: [hide]'s literal and both
-  /// of [_dismiss]'s. The two window-driven routes never cross it — the
+  /// of [_dismissForFocusLoss]'s. The two window-driven routes never cross it — the
   /// `minimize` arm calls this method directly with
   /// [PanelVisibilityState.iconified]. The GTK `hide` event does not create a
   /// departure; [_hide] already reported the reason owned by its request. A

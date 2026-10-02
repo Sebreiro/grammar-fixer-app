@@ -17,6 +17,10 @@ void main() {
       });
 
       expect(paths.configFile, '/x/hotkey-grammar-corrector/config.json');
+      expect(
+        paths.logFile,
+        '/x/hotkey-grammar-corrector/logs/grammmar-corrector.log',
+      );
       expect(paths.databaseFile, '/y/hotkey-grammar-corrector/history.sqlite');
       expect(paths.runtimeDirectory, '/z/hotkey-grammar-corrector');
       expect(paths.warning, isNull);
@@ -36,6 +40,10 @@ void main() {
       expect(
         paths.databaseFile,
         '/home/u/.local/share/hotkey-grammar-corrector/history.sqlite',
+      );
+      expect(
+        paths.logFile,
+        '/home/u/.config/hotkey-grammar-corrector/logs/grammmar-corrector.log',
       );
       expect(paths.warning, isNull);
     });
@@ -94,6 +102,10 @@ void main() {
       });
 
       expect(paths.configFile, '/x/hotkey-grammar-corrector/config.json');
+      expect(
+        paths.logFile,
+        '/x/hotkey-grammar-corrector/logs/grammmar-corrector.log',
+      );
       expect(paths.databaseFile, '/y/hotkey-grammar-corrector/history.sqlite');
       expect(paths.runtimeDirectory, '/z/hotkey-grammar-corrector');
     });
@@ -162,6 +174,10 @@ void main() {
       });
 
       expect(paths.configFile, '/x/hotkey-grammar-corrector/config.json');
+      expect(
+        paths.logFile,
+        '/x/hotkey-grammar-corrector/logs/grammmar-corrector.log',
+      );
     });
 
     test(

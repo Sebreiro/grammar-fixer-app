@@ -32,6 +32,7 @@ final class ProviderRegistry {
         ),
         OpenAiCompatibleCorrectionProvider.providerId: (config) =>
             OpenAiCompatibleCorrectionProvider(
+              logger: logger,
               baseUrl:
                   config.settings[OpenAiCompatibleCorrectionProvider
                       .baseUrlSettingsKey] ??

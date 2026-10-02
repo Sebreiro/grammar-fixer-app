@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 
 import '../../domain/config/app_config.dart';
+import '../../domain/config/close_behavior.dart';
 import '../../domain/config/config_load_result.dart';
 import '../../domain/config/config_store.dart';
 import '../../domain/config/config_write_conflict.dart';
@@ -13,7 +14,6 @@ import '../../domain/config/provider_config.dart';
 import '../../domain/correction/preset.dart';
 import '../../domain/hotkey/hotkey_binding.dart';
 import 'app_paths.dart';
-import 'provider_secret_fields.dart';
 
 /// AD-13's single owner of the config file: the only code in `lib/` that
 /// opens it, parses it, validates it, or writes it.
@@ -70,6 +70,7 @@ final class JsonConfigStore implements ConfigStore {
   StreamSubscription<FileSystemEvent>? _fileEvents;
 
   AppConfig? _loaded;
+  Map<String, String> _promptFileNames = const {};
 
   @override
   AppConfig get current {
@@ -85,7 +86,7 @@ final class JsonConfigStore implements ConfigStore {
 
   @override
   Future<ConfigLoadResult> load() => _serialized(() async {
-    final result = await _read();
+    final result = await _loadAndMigratePrompts();
     final changed = _loaded != null && _loaded != result.config;
     _loaded = result.config;
     if (changed && result.warning == null && !_changes.isClosed) {
@@ -94,6 +95,26 @@ final class JsonConfigStore implements ConfigStore {
     await _watchFile();
     return result;
   });
+
+  Future<ConfigLoadResult> _loadAndMigratePrompts() async {
+    final result = await _read();
+    if (result.warning != null ||
+        _promptFileNames.length == result.config.presets.length) {
+      return result;
+    }
+    try {
+      await _writeFile(result.config);
+      return result;
+    } on FileSystemException catch (error) {
+      return ConfigLoadResult(
+        config: result.config,
+        warning:
+            'could not move inline prompts to .txt files beside '
+            '"${_file.path}"; continuing with the saved inline prompts',
+        warningErrorType: error.runtimeType.toString(),
+      );
+    }
+  }
 
   @override
   Future<void> write(AppConfig config) async {
@@ -119,43 +140,14 @@ final class JsonConfigStore implements ConfigStore {
           throw const ConfigWriteConflict();
         }
       }
-      final persisted = _preserveHandPlacedKey(_loaded, config);
-      await _writeFile(persisted);
-      _loaded = persisted;
+      await _writeFile(config);
+      _loaded = config;
       // A write can resolve after shutdown; adding then would be an
       // unhandled "add after close" in a daemon that is already going down.
       if (!_changes.isClosed) {
-        _changes.add(persisted);
+        _changes.add(config);
       }
     });
-  }
-
-  /// D-17: only a key already read from the file may survive a Settings save.
-  /// A caller cannot create one by passing a new provider settings map. This
-  /// preserves the user's hand-placed field in a whole-file rewrite, the
-  /// approved exception to the phase spec's literal no-write criterion.
-  static AppConfig _preserveHandPlacedKey(
-    AppConfig? current,
-    AppConfig requested,
-  ) {
-    final providerId = ProviderSecretFields.providerId;
-    final requestedProvider = requested.providers[providerId];
-    if (requestedProvider == null) return requested;
-
-    final existing = current
-        ?.providers[providerId]
-        ?.settings[ProviderSecretFields.configKey];
-    final settings = {...requestedProvider.settings}
-      ..remove(ProviderSecretFields.configKey);
-    if (existing != null) {
-      settings[ProviderSecretFields.configKey] = existing;
-    }
-    return requested.copyWith(
-      providers: {
-        ...requested.providers,
-        providerId: ProviderConfig(settings: Map.unmodifiable(settings)),
-      },
-    );
   }
 
   /// Runs [operation] after every file operation queued before it. A failure
@@ -186,8 +178,9 @@ final class JsonConfigStore implements ConfigStore {
       }
       _fileEvents = _file.parent.watch().listen(
         (event) {
-          if (event.path.split(Platform.pathSeparator).last !=
-              _file.uri.pathSegments.last) {
+          final name = event.path.split(Platform.pathSeparator).last;
+          if (name != _file.uri.pathSegments.last &&
+              !_promptFileNames.containsValue(name)) {
             return;
           }
           unawaited(_refreshFromDisk());
@@ -222,8 +215,14 @@ final class JsonConfigStore implements ConfigStore {
   /// F-key, say) is legitimate, and ruling it out is the hotkey layer's
   /// call, not this store's.
   static String? validationProblem(AppConfig config) {
+    if (config.logMaxBytes < AppConfig.minimumLogMaxBytes) {
+      return 'logMaxBytes must be at least ${AppConfig.minimumLogMaxBytes}';
+    }
     final seenPresetIds = <String>{};
     for (final preset in config.presets) {
+      if (preset.systemPrompt.trim().isEmpty) {
+        return 'preset "${preset.id}" systemPrompt must not be empty';
+      }
       // Consumers resolve the active preset with a single-match lookup, so a
       // duplicate id is a crash waiting downstream of a config this method
       // would otherwise have certified.
@@ -253,11 +252,13 @@ final class JsonConfigStore implements ConfigStore {
     try {
       if (!await _file.exists()) {
         final (warning, errorType) = await _seed();
-        return ConfigLoadResult(
-          config: _defaults,
-          warning: warning,
-          warningErrorType: errorType,
-        );
+        if (warning != null) {
+          return ConfigLoadResult(
+            config: _defaults,
+            warning: warning,
+            warningErrorType: errorType,
+          );
+        }
       }
       contents = await _file.readAsString();
     } on IOException catch (error) {
@@ -266,9 +267,9 @@ final class JsonConfigStore implements ConfigStore {
         errorType: error.runtimeType.toString(),
       );
     }
-    final AppConfig config;
+    final ({AppConfig config, Map<String, String> promptFiles}) decoded;
     try {
-      config = _decode(contents);
+      decoded = await _decode(contents);
     } on _ConfigFormatException catch (error) {
       return _defaultsWithWarning(
         'is invalid: ${error.message}',
@@ -281,14 +282,15 @@ final class JsonConfigStore implements ConfigStore {
         errorType: error.runtimeType.toString(),
       );
     }
-    final problem = validationProblem(config);
+    final problem = validationProblem(decoded.config);
     if (problem != null) {
       return _defaultsWithWarning(
         'is inconsistent: $problem',
         loggedProblem: 'contains inconsistent settings',
       );
     }
-    return ConfigLoadResult(config: config);
+    _promptFileNames = decoded.promptFiles;
+    return ConfigLoadResult(config: decoded.config);
   }
 
   /// A first run writes the defaults out so CAP-8's "edit the config file"
@@ -296,7 +298,18 @@ final class JsonConfigStore implements ConfigStore {
   /// seed cannot be written — startup survives a read-only home.
   Future<(String?, String?)> _seed() async {
     try {
-      await _writeFile(_defaults);
+      final names = {
+        for (final preset in _defaults.presets)
+          preset.id: _defaultPromptFileName(preset.id),
+      };
+      final contents = <(File, String)>[];
+      for (final preset in _defaults.presets) {
+        final prompt = _promptFile(_requiredFileName(names, preset.id));
+        // Reseeding a deleted config must not erase a user's existing prompt.
+        if (!await prompt.exists()) contents.add((prompt, preset.systemPrompt));
+      }
+      contents.add((_file, _encode(_defaults, names)));
+      await _writeFiles(contents);
       return (null, null);
     } on FileSystemException catch (error) {
       return (
@@ -325,22 +338,113 @@ final class JsonConfigStore implements ConfigStore {
   /// name is unique per write: a fixed one lets two writers truncate each
   /// other and leaves the loser renaming a file that no longer exists.
   Future<void> _writeFile(AppConfig config) async {
-    await _file.parent.create(recursive: true);
-    _tempSequence += 1;
-    final temp = File('${_file.path}.$pid.$_tempSequence.tmp');
+    final names = await _fileNamesFor(config);
+    await _writeFiles([
+      for (final preset in config.presets)
+        (_promptFile(_requiredFileName(names, preset.id)), preset.systemPrompt),
+      (_file, _encode(config, names)),
+    ]);
+    _promptFileNames = names;
+  }
+
+  File _promptFile(String name) => File('${_file.parent.path}/$name');
+
+  static String _defaultPromptFileName(String presetId) =>
+      'prompt-${Uri.encodeComponent(presetId)}.txt';
+
+  Future<Map<String, String>> _fileNamesFor(AppConfig config) async {
+    final names = <String, String>{
+      for (final preset in config.presets)
+        preset.id: ?_promptFileNames[preset.id],
+    };
+    for (final preset in config.presets) {
+      if (names.containsKey(preset.id)) continue;
+      final base = _defaultPromptFileName(preset.id);
+      var candidate = base;
+      var suffix = 2;
+      while (names.containsValue(candidate) ||
+          await FileSystemEntity.type(_promptFile(candidate).path) !=
+              FileSystemEntityType.notFound) {
+        candidate = '${base.substring(0, base.length - 4)}-${suffix++}.txt';
+      }
+      names[preset.id] = candidate;
+    }
+    return names;
+  }
+
+  static String _requiredFileName(Map<String, String> names, String presetId) {
+    final name = names[presetId];
+    if (name == null) throw StateError('No prompt file for preset $presetId');
+    return name;
+  }
+
+  /// Stage every file before replacing any: disk-full and permission failures
+  /// must leave the saved preset and its prompt together.
+  Future<void> _writeFiles(List<(File, String)> contents) async {
+    final prepared = <_PreparedWrite>[];
     try {
-      final existing = await _file.stat();
+      for (final (target, text) in contents) {
+        final previous = await target.exists()
+            ? await target.readAsString()
+            : null;
+        if (previous == text) continue;
+        final temp = await _stageFile(target, text);
+        prepared.add(_PreparedWrite(target, temp, previous));
+      }
+      await _installFiles(prepared);
+    } finally {
+      for (final write in prepared) {
+        await _discard(write.temp);
+      }
+    }
+  }
+
+  Future<void> _installFiles(List<_PreparedWrite> prepared) async {
+    final installed = <_PreparedWrite>[];
+    try {
+      for (final write in prepared) {
+        await write.temp.rename(write.target.path);
+        installed.add(write);
+      }
+    } on FileSystemException {
+      for (final write in installed.reversed) {
+        await _restoreFile(write);
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _restoreFile(_PreparedWrite write) async {
+    final previous = write.previous;
+    if (previous == null) {
+      await write.target.delete();
+      return;
+    }
+    final temp = await _stageFile(write.target, previous);
+    try {
+      await temp.rename(write.target.path);
+    } finally {
+      await _discard(temp);
+    }
+  }
+
+  Future<File> _stageFile(File target, String contents) async {
+    await target.parent.create(recursive: true);
+    _tempSequence += 1;
+    final temp = File('${target.path}.$pid.$_tempSequence.tmp');
+    try {
+      final existing = await target.stat();
       final finalMode = existing.type == FileSystemEntityType.file
           ? existing.mode & _ownerReadWrite
           : _ownerReadWrite;
       if (Platform.isLinux) {
         _createOwnerOnly(temp.path);
       }
-      await temp.writeAsString(_encode(config), flush: true);
+      await temp.writeAsString(contents, flush: true);
       if (Platform.isLinux && finalMode != _ownerReadWrite) {
         _setMode(temp.path, finalMode);
       }
-      await temp.rename(_file.path);
+      return temp;
     } on FileSystemException {
       await _discard(temp);
       rethrow;
@@ -405,10 +509,13 @@ final class JsonConfigStore implements ConfigStore {
     }
   }
 
-  static String _encode(AppConfig config) =>
-      '${_encoder.convert(_toJson(config))}\n';
+  static String _encode(AppConfig config, Map<String, String> promptFiles) =>
+      '${_encoder.convert(_toJson(config, promptFiles))}\n';
 
-  static Map<String, Object?> _toJson(AppConfig config) => {
+  static Map<String, Object?> _toJson(
+    AppConfig config,
+    Map<String, String> promptFiles,
+  ) => {
     'providers': {
       for (final MapEntry(:key, :value) in config.providers.entries)
         key: {'settings': value.settings},
@@ -419,10 +526,12 @@ final class JsonConfigStore implements ConfigStore {
           'id': preset.id,
           'providerId': preset.providerId,
           'model': preset.model,
-          'systemPrompt': preset.systemPrompt,
+          'systemPromptFile': _requiredFileName(promptFiles, preset.id),
         },
     ],
     'activePresetId': config.activePresetId,
+    'closeBehavior': config.closeBehavior.name,
+    'logMaxBytes': config.logMaxBytes,
     'hotkeyBinding': {
       // Enums serialize by .name, never by index, so reordering the enum
       // cannot silently rewrite a stored binding (Consistency Conventions).
@@ -440,14 +549,101 @@ final class JsonConfigStore implements ConfigStore {
   /// decoder only ever reads what it names — but that tolerance is what makes
   /// the leftovers *harmless*, not what makes the file load. Dropping a key
   /// `_decode` still required would fail it regardless.)
-  static AppConfig _decode(String contents) {
+  Future<({AppConfig config, Map<String, String> promptFiles})> _decode(
+    String contents,
+  ) async {
     final root = _object(jsonDecode(contents), 'the config file');
-    return AppConfig(
-      providers: _providers(root),
-      presets: _presets(root),
-      activePresetId: _string(root, 'activePresetId'),
-      hotkeyBinding: _hotkeyBinding(root),
-    );
+    final entries = _presetEntries(root);
+    final names = _promptReferences(entries);
+    final prompts = <String, String>{};
+    for (final name in names.values) {
+      prompts[name] = await _readPrompt(name);
+    }
+    return (config: _configValue(root, entries, prompts), promptFiles: names);
+  }
+
+  static AppConfig _configValue(
+    Map<String, Object?> root,
+    List<Map<String, Object?>> entries,
+    Map<String, String> prompts,
+  ) => AppConfig(
+    providers: _providers(root),
+    presets: [for (final entry in entries) _preset(entry, prompts)],
+    activePresetId: _string(root, 'activePresetId'),
+    hotkeyBinding: _hotkeyBinding(root),
+    closeBehavior: _closeBehavior(root),
+    logMaxBytes: _logMaxBytes(root),
+  );
+
+  Future<String> _readPrompt(String name) async {
+    try {
+      return utf8.decode(await _promptFile(name).readAsBytes());
+    } on IOException {
+      throw _ConfigFormatException(
+        'systemPromptFile "$name" could not be read',
+      );
+    } on FormatException {
+      throw _ConfigFormatException(
+        'systemPromptFile "$name" must contain UTF-8 text',
+      );
+    }
+  }
+
+  static Map<String, String> _promptReferences(
+    List<Map<String, Object?>> entries,
+  ) {
+    final names = <String, String>{};
+    for (final entry in entries) {
+      if (!entry.containsKey('systemPromptFile')) continue;
+      if (entry.containsKey('systemPrompt')) {
+        throw _ConfigFormatException(
+          'a preset must use either systemPrompt or systemPromptFile, not both',
+        );
+      }
+      final name = _promptFileName(entry);
+      if (names.containsValue(name)) {
+        throw _ConfigFormatException(
+          'preset "${_string(entry, 'id')}" needs its own systemPromptFile',
+        );
+      }
+      names[_string(entry, 'id')] = name;
+    }
+    return names;
+  }
+
+  static String _promptFileName(Map<String, Object?> entry) {
+    final name = _string(entry, 'systemPromptFile');
+    if (!name.endsWith('.txt') ||
+        name.contains('/') ||
+        name.contains('\\') ||
+        name.contains('\u0000')) {
+      throw _ConfigFormatException(
+        'systemPromptFile must name a .txt file beside config.json',
+      );
+    }
+    return name;
+  }
+
+  static int _logMaxBytes(Map<String, Object?> root) {
+    if (!root.containsKey('logMaxBytes')) return AppConfig.defaultLogMaxBytes;
+    return switch (root['logMaxBytes']) {
+      int value when value >= AppConfig.minimumLogMaxBytes => value,
+      _ => throw _ConfigFormatException(
+        '"logMaxBytes" must be an integer of at least ${AppConfig.minimumLogMaxBytes}',
+      ),
+    };
+  }
+
+  static CloseBehavior _closeBehavior(Map<String, Object?> root) {
+    // Config files from older builds keep the resident daemon behavior.
+    if (!root.containsKey('closeBehavior')) return CloseBehavior.closeToTray;
+    return switch (root['closeBehavior']) {
+      'closeToTray' => CloseBehavior.closeToTray,
+      'quit' => CloseBehavior.quit,
+      _ => throw _ConfigFormatException(
+        '"closeBehavior" must be "closeToTray" or "quit"',
+      ),
+    };
   }
 
   static Map<String, ProviderConfig> _providers(Map<String, Object?> root) {
@@ -489,24 +685,39 @@ final class JsonConfigStore implements ConfigStore {
     _ => null,
   };
 
-  static List<Preset> _presets(Map<String, Object?> root) {
+  static List<Map<String, Object?>> _presetEntries(Map<String, Object?> root) {
     final presets = root['presets'];
     if (presets is! List<Object?>) {
       throw _ConfigFormatException(
         '"presets" must be a list, found ${_describe(presets)}',
       );
     }
-    return [
-      for (final entry in presets) _preset(_object(entry, 'each preset')),
-    ];
+    return [for (final entry in presets) _object(entry, 'each preset')];
   }
 
-  static Preset _preset(Map<String, Object?> entry) => Preset(
+  static Preset _preset(
+    Map<String, Object?> entry,
+    Map<String, String> prompts,
+  ) => Preset(
     id: _string(entry, 'id'),
     providerId: _string(entry, 'providerId'),
     model: _string(entry, 'model'),
-    systemPrompt: _string(entry, 'systemPrompt'),
+    systemPrompt: _systemPrompt(entry, prompts),
   );
+
+  static String _systemPrompt(
+    Map<String, Object?> entry,
+    Map<String, String> prompts,
+  ) {
+    if (!entry.containsKey('systemPromptFile')) {
+      return _string(entry, 'systemPrompt');
+    }
+    final prompt = prompts[_string(entry, 'systemPromptFile')];
+    if (prompt == null) {
+      throw _ConfigFormatException('systemPromptFile could not be resolved');
+    }
+    return prompt;
+  }
 
   static HotkeyBinding _hotkeyBinding(Map<String, Object?> root) {
     final binding = _object(root['hotkeyBinding'], '"hotkeyBinding"');
@@ -560,6 +771,14 @@ final class JsonConfigStore implements ConfigStore {
     List<Object?>() => 'a list',
     _ => '$value',
   };
+}
+
+final class _PreparedWrite {
+  const _PreparedWrite(this.target, this.temp, this.previous);
+
+  final File target;
+  final File temp;
+  final String? previous;
 }
 
 /// A structural problem in the config file. Its message is authored solely by

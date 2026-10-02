@@ -6,6 +6,7 @@ import '../../../domain/correction/correction_event.dart';
 import '../../../domain/correction/correction_provider.dart';
 import '../../../domain/correction/preset.dart';
 import '../../../domain/logger.dart';
+import '../shared/register_tagged_prompt.dart';
 import '../shared/register_tagged_stream_parser.dart';
 import 'sidecar_protocol.dart';
 
@@ -71,7 +72,7 @@ final class ClaudeAgentSdkCorrectionProvider implements CorrectionProvider {
       request: SidecarRequest(
         text: text,
         model: preset.model,
-        systemPrompt: preset.systemPrompt,
+        systemPrompt: RegisterTaggedPrompt.compose(preset.systemPrompt),
       ),
     );
     return run.events;

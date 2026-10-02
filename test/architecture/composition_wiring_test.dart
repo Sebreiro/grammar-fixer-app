@@ -549,7 +549,24 @@ void main() {
           'CAP-14 reach anything; swapping either back to a placeholder must '
           'fail a test rather than pass in silence',
     );
-    expect(main, contains('WindowManagerPanelWindow()'));
+    expect(
+      main,
+      matches(
+        RegExp(
+          r'WindowManagerPanelWindow\(\s*activationPresenter: activationPresenter',
+        ),
+      ),
+    );
+    expect(
+      main,
+      contains('const activationPresenter = GtkPanelActivationPresenter()'),
+    );
+    expect(main, contains('activationContext: activationContext'));
+    expect(
+      main,
+      contains('onActivationToken: activationContext.preparePortal'),
+    );
+    expect(main, contains('onPanelRequest: activationContext.prepareTray'));
     expect(
       main,
       contains('panelVisibilityProvider.overrideWithValue(panelVisibility)'),
@@ -1006,7 +1023,7 @@ void main() {
           r'\s*panelVisibility: openedPanelVisibility,'
           r'\s*trayIcon: openedTrayIcon,\s*tray: openedTray,'
           r'\s*hotkeyRegistrar: hotkeyRegistrar,'
-          r'\s*startup: startup,\s*logger: logger,?\s*\)',
+          r'\s*startup: startup,\s*logger: logger,\s*closeLogs: closeLogs,?\s*\)',
         ),
       ),
       reason:
@@ -1246,7 +1263,7 @@ void main() {
     // the ordered teardown.
     final call =
         RegExp(
-          r'\n\s+_installSignalHandlers\(lifecycle\);',
+          r'\n\s+_installSignalHandlers\(lifecycle, closeLogs, logger\);',
         ).firstMatch(main)?.start ??
         -1;
     expect(
@@ -1287,6 +1304,13 @@ void main() {
 
     expect(
       body,
+      contains("('window Close', panelQuitRequests)"),
+      reason:
+          'native Close with quit selected shares the tray shutdown handler',
+    );
+
+    expect(
+      body,
       contains('tray.quitRequests'),
       reason:
           'the handler listens to the port stream the menu emits on; anything '
@@ -1313,7 +1337,11 @@ void main() {
     // identically.
     expect(
       body,
-      matches(RegExp(r'await lifecycle\.shutdown\(\);\s*exit\(0\);')),
+      matches(
+        RegExp(
+          r'await lifecycle\.shutdown\(\);\s*await closeLogs\(\);\s*exit\(0\);',
+        ),
+      ),
       reason: 'the exit follows the teardown; it does not race it',
     );
     // The repeat branch. A pick landing on a teardown already draining must
@@ -1377,12 +1405,12 @@ void main() {
     // definition.
     final quitCall =
         RegExp(
-          r'\n\s+_installQuitHandler\(\s*tray: tray,\s*lifecycle: lifecycle,?\s*\);',
+          r'\n\s+_installQuitHandler\(\s*tray: tray,\s*lifecycle: lifecycle,\s*panelQuitRequests: graph\.quitRequests,\s*closeLogs: closeLogs,\s*logger: logger,?\s*\);',
         ).firstMatch(main)?.start ??
         -1;
     final signalCall =
         RegExp(
-          r'\n\s+_installSignalHandlers\(lifecycle\);',
+          r'\n\s+_installSignalHandlers\(lifecycle, closeLogs, logger\);',
         ).firstMatch(main)?.start ??
         -1;
 

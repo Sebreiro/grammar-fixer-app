@@ -391,6 +391,7 @@ final class FakeGlobalShortcutsPortal {
     DBusObjectPath? session,
     String shortcutId = 'toggle-panel',
     int timestamp = 1234,
+    Map<String, DBusValue> options = const {},
   }) async {
     await _emitSettled(
       from: _service,
@@ -401,7 +402,7 @@ final class FakeGlobalShortcutsPortal {
         session ?? currentSession ?? DBusObjectPath('/no/session'),
         DBusString(shortcutId),
         DBusUint64(timestamp),
-        DBusDict.stringVariant(const {}),
+        DBusDict.stringVariant(options),
       ],
     );
   }

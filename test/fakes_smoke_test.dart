@@ -13,6 +13,7 @@ import 'fakes/fake_correction_repository.dart';
 import 'fakes/fake_global_hotkey.dart';
 import 'fakes/fake_logger.dart';
 import 'fakes/fake_panel_visibility.dart';
+import 'fakes/fake_provider_key_writer.dart';
 import 'fakes/fake_tray_port.dart';
 
 /// Smoke test only: constructs one fake per domain port (AGENTS.md §4.1) so
@@ -43,11 +44,12 @@ void main() {
       FakeTrayPort(),
       FakeCorrectionRepository(),
       FakeConfigStore(current: config),
+      FakeProviderKeyWriter(),
       FakeClock(),
       FakeLogger(),
     ];
 
-    expect(fakes, hasLength(9));
+    expect(fakes, hasLength(10));
     expect(fakes.whereType<CorrectionProvider>(), hasLength(1));
   });
 }

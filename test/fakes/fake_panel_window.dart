@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:hotkey_grammar_corrector/src/infrastructure/panel/panel_activation.dart';
+
 import 'package:hotkey_grammar_corrector/src/infrastructure/panel/panel_window.dart';
 
 /// A [PanelWindow] that models a **lagging** window, and models its *state* as
@@ -20,6 +22,8 @@ import 'package:hotkey_grammar_corrector/src/infrastructure/panel/panel_window.d
 /// `test/platform/panel_visibility_live_test.dart`).
 final class FakePanelWindow implements PanelWindow {
   FakePanelWindow({this.showHasMinimizedPreHop = false});
+
+  final List<PanelActivation?> focusActivations = [];
 
   /// Models `windowManager.show()`'s real shape: `await isMinimized()` first,
   /// and only then `invokeMethod('show')`. That first hop is a second await
@@ -79,7 +83,8 @@ final class FakePanelWindow implements PanelWindow {
   }
 
   @override
-  Future<void> focus() async {
+  Future<void> focus({PanelActivation? activation}) async {
+    focusActivations.add(activation);
     // `gtk_window_present`: raises *and maps*. This is the call that made the
     // reverted attempt's panel reappear.
     await _park('focus', becomesVisible: true);

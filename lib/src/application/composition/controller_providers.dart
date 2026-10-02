@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/logger.dart';
 import '../correction_controller.dart';
 import '../panel_controller.dart';
+import '../panel_close_controller.dart';
 import '../settings_controller.dart';
 import 'port_providers.dart';
 
@@ -62,6 +63,17 @@ final settingsControllerProvider = Provider<SettingsController>((ref) {
     logger: logger,
   );
   _disposeWith(ref, logger, 'SettingsController', controller.dispose);
+  return controller;
+});
+
+final panelCloseControllerProvider = Provider<PanelCloseController>((ref) {
+  final logger = ref.watch(loggerProvider);
+  final controller = PanelCloseController(
+    configStore: ref.watch(configStoreProvider),
+    visibility: ref.watch(panelVisibilityProvider),
+    logger: logger,
+  );
+  _disposeWith(ref, logger, 'PanelCloseController', controller.dispose);
   return controller;
 });
 

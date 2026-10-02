@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import '../domain/config/app_config.dart';
+import '../domain/config/close_behavior.dart';
 import '../domain/config/config_store.dart';
 import '../domain/config/config_write_conflict.dart';
 import '../domain/config/provider_config.dart';
+import '../domain/config/provider_key_writer.dart';
+import '../domain/config/secret_write_result.dart';
 import '../domain/correction/preset.dart';
 import '../domain/hotkey/global_hotkey.dart';
 import '../domain/hotkey/hotkey_bind_outcome.dart';
@@ -103,6 +106,7 @@ final class SettingsController {
   final GlobalHotkey _hotkey;
   final Logger _logger;
   Future<String> Function(ProviderConfig)? _apiKeySourceLabel;
+  ProviderKeyWriter? _providerKeyWriter;
   void Function(AppConfig)? _onConfigApplied;
 
   late final StreamSubscription<AppConfig> _configChanges;
@@ -174,8 +178,9 @@ final class SettingsController {
   Future<String> keySourceLabel() async {
     final source = _apiKeySourceLabel;
     final provider =
-        _state.config.providers[ProviderConfig.compatibleProviderId];
-    if (source == null || provider == null) return 'None configured';
+        _state.config.providers[ProviderConfig.compatibleProviderId] ??
+        const ProviderConfig(settings: {});
+    if (source == null) return 'None configured';
     try {
       return await source(provider);
     } on Object catch (error) {
@@ -192,6 +197,176 @@ final class SettingsController {
   /// Binds the source-only credential lookup after the graph is constructed.
   void attachApiKeySourceLabel(Future<String> Function(ProviderConfig) source) {
     _apiKeySourceLabel = source;
+  }
+
+  void attachProviderKeyWriter(ProviderKeyWriter writer) {
+    _providerKeyWriter = writer;
+  }
+
+  /// The injected writer owns credential persistence and its storage policy.
+  Future<bool> saveApiKey(String apiKey) async {
+    if (!_beginMutation()) return false;
+    try {
+      final saved =
+          apiKey.trim().isNotEmpty && await _writeApiKey(apiKey.trim());
+      final config = _currentConfig();
+      if (saved && config != _state.config) _notifyConfigApplied(config);
+      _finishSettingsMutation(
+        saved
+            ? null
+            : const SettingsFailure(
+                kind: SettingsFailureKind.configWriteFailed,
+                message:
+                    'The API key could not be saved. Unlock your system keyring '
+                    'or check that the config file is writable, then try again.',
+              ),
+        _Mutation.apiKey,
+      );
+      return saved;
+    } finally {
+      _endMutation();
+    }
+  }
+
+  Future<bool> _writeApiKey(String apiKey) async {
+    final writer = _providerKeyWriter;
+    if (writer == null) return false;
+    try {
+      return await writer.writeProviderKey(
+            ProviderConfig.compatibleProviderId,
+            apiKey,
+          ) ==
+          SecretWriteResult.saved;
+    } on Object catch (error) {
+      _log(
+        () => _logger.error(
+          'the API key write failed',
+          context: _errorContext(error),
+        ),
+      );
+      return false;
+    }
+  }
+
+  void _finishSettingsMutation(SettingsFailure? failure, _Mutation mutation) {
+    _setState(
+      SettingsState(
+        config: _currentConfig(),
+        hotkeyBindOutcome: _state.hotkeyBindOutcome,
+        hotkeyBackendDescription: _state.hotkeyBackendDescription,
+        failure: _resolveFailure(failure, mutation),
+        mutationInFlight: false,
+      ),
+    );
+  }
+
+  /// A provider choice activates a complete prompt/model preset (CAP-8).
+  Future<void> changeActiveProvider(String providerId) async {
+    final preset = _state.presetForProvider(providerId);
+    if (preset != null) await changeActivePreset(preset.id);
+  }
+
+  Future<void> changeCloseBehavior(CloseBehavior behavior) async {
+    if (!_beginMutation()) return;
+    try {
+      final failure = await _writeChange(
+        (config) => config.copyWith(closeBehavior: behavior),
+      );
+      _finishSettingsMutation(failure, _Mutation.closeBehavior);
+    } finally {
+      _endMutation();
+    }
+  }
+
+  Future<void> changeLogMaxBytes(int maxBytes) async {
+    if (!_beginMutation()) return;
+    try {
+      final failure = await _writeChange(
+        (config) => config.copyWith(logMaxBytes: maxBytes),
+      );
+      _finishSettingsMutation(failure, _Mutation.logSize);
+    } finally {
+      _endMutation();
+    }
+  }
+
+  /// First-time URL setup binds the entered model to the current prompt.
+  Future<void> configureCompatibleProvider({
+    required String baseUrl,
+    required String model,
+  }) async {
+    if (!_beginMutation()) return;
+    try {
+      final problem = baseUrl.trim().isEmpty || model.trim().isEmpty
+          ? 'Base URL and Model are required.'
+          : ProviderConfig.baseUrlProblem(baseUrl);
+      final failure = problem == null
+          ? await _writeChange(
+              (config) => _withCompatibleSetup(
+                config,
+                baseUrl: baseUrl.trim(),
+                model: model.trim(),
+              ),
+            )
+          : SettingsFailure(
+              kind: SettingsFailureKind.configRejected,
+              message: problem,
+            );
+      _finishSettingsMutation(failure, _Mutation.provider);
+    } finally {
+      _endMutation();
+    }
+  }
+
+  static AppConfig _withCompatibleSetup(
+    AppConfig config, {
+    required String baseUrl,
+    required String model,
+  }) {
+    final active = config.presets.firstWhere(
+      (preset) => preset.id == config.activePresetId,
+    );
+    final existing = config.presets
+        .where(
+          (preset) => preset.providerId == ProviderConfig.compatibleProviderId,
+        )
+        .firstOrNull;
+    if (existing != null) {
+      return _withProviderSettings(
+        config.copyWith(activePresetId: existing.id),
+        baseUrl: baseUrl,
+        model: model,
+      );
+    }
+    final preset = Preset(
+      id: _newCompatiblePresetId(config),
+      providerId: ProviderConfig.compatibleProviderId,
+      model: model,
+      systemPrompt: active.systemPrompt,
+    );
+    return config.copyWith(
+      providers: Map.unmodifiable({
+        ...config.providers,
+        preset.providerId: ProviderConfig(
+          settings: Map.unmodifiable({
+            ...?config.providers[preset.providerId]?.settings,
+            ProviderConfig.baseUrlSetting: baseUrl,
+          }),
+        ),
+      }),
+      presets: List.unmodifiable([...config.presets, preset]),
+      activePresetId: preset.id,
+    );
+  }
+
+  static String _newCompatiblePresetId(AppConfig config) {
+    final ids = config.presets.map((preset) => preset.id).toSet();
+    const base = 'openai-compatible-default';
+    var candidate = base;
+    for (var suffix = 2; ids.contains(candidate); suffix++) {
+      candidate = '$base-$suffix';
+    }
+    return candidate;
   }
 
   /// The tray's view of the same result and notice this controller renders.
@@ -333,6 +508,59 @@ final class SettingsController {
       _endMutation();
     }
   }
+
+  /// Writes the edited prompt without separating it from its preset's model.
+  Future<void> changeCorrectionPrompt({
+    required Preset preset,
+    required String systemPrompt,
+  }) async {
+    if (!_beginMutation()) return;
+    try {
+      final failure = systemPrompt.trim().isEmpty
+          ? const SettingsFailure(
+              kind: SettingsFailureKind.configRejected,
+              message: 'Correction prompt must not be empty.',
+            )
+          : await _writeChange(
+              (config) => _withCorrectionPrompt(config, preset, systemPrompt),
+              rejectedMessage:
+                  'The active preset or prompt changed. Review its prompt and save again.',
+            );
+      _finishSettingsMutation(failure, _Mutation.prompt);
+    } finally {
+      _endMutation();
+    }
+  }
+
+  static AppConfig _withCorrectionPrompt(
+    AppConfig config,
+    Preset expected,
+    String prompt,
+  ) {
+    final active = config.presets
+        .where((preset) => preset.id == config.activePresetId)
+        .firstOrNull;
+    if (active?.id != expected.id ||
+        active?.systemPrompt != expected.systemPrompt) {
+      throw ArgumentError('The active preset or prompt changed.');
+    }
+    return config.copyWith(
+      presets: List.unmodifiable([
+        for (final preset in config.presets)
+          if (preset.id == config.activePresetId)
+            _presetWithPrompt(preset, prompt)
+          else
+            preset,
+      ]),
+    );
+  }
+
+  static Preset _presetWithPrompt(Preset preset, String prompt) => Preset(
+    id: preset.id,
+    providerId: preset.providerId,
+    model: preset.model,
+    systemPrompt: prompt,
+  );
 
   /// Saves the selected compatible endpoint and its preset's model together.
   /// The existing prompt and provider id stay on the same preset value.
@@ -755,8 +983,10 @@ final class SettingsController {
   /// what the user experiences and what they can act on; the breach itself
   /// reaches the log, by type.
   Future<SettingsFailure?> _writeChange(
-    AppConfig Function(AppConfig config) change,
-  ) async {
+    AppConfig Function(AppConfig config) change, {
+    String rejectedMessage =
+        'The selected provider changed. Select it again and retry.',
+  }) async {
     for (var attempt = 0; attempt < 3; attempt += 1) {
       final AppConfig current;
       try {
@@ -791,9 +1021,9 @@ final class SettingsController {
             context: _errorContext(error),
           ),
         );
-        return const SettingsFailure(
+        return SettingsFailure(
           kind: SettingsFailureKind.configRejected,
-          message: 'The selected provider changed. Select it again and retry.',
+          message: rejectedMessage,
         );
       }
     }
@@ -970,7 +1200,15 @@ final class SettingsController {
 /// Which mutation a [SettingsFailure] belongs to. Private: it disambiguates
 /// ownership of the single failure slot and is not part of what the surface
 /// renders.
-enum _Mutation { hotkey, preset, provider }
+enum _Mutation {
+  hotkey,
+  preset,
+  provider,
+  apiKey,
+  closeBehavior,
+  logSize,
+  prompt,
+}
 
 /// Emits a log line without letting the logger's own failure escape — see the
 /// canonical note in `correction_controller.dart`.

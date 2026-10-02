@@ -60,12 +60,14 @@ void main() {
     DBusClient? client,
     PortalAppIdRegime appIdRegime = PortalAppIdRegime.hostRegistry,
     Duration requestTimeout = _shippedCallBudget,
+    void Function(String?)? onActivationToken,
   }) {
     final hotkey = WaylandPortalGlobalHotkey(
       client: client ?? portal.newClient(),
       appIdRegime: appIdRegime,
       requestTimeout: requestTimeout,
       logger: withLogger ?? logger,
+      onActivationToken: onActivationToken,
     );
     addTearDown(hotkey.dispose);
     return hotkey;
@@ -1412,10 +1414,63 @@ void main() {
         reason: 'the last request issued is the one that ends up in effect',
       );
     });
-
   });
 
   group('activations (CAP-1, AD-8, AD-11)', () {
+    test(
+      'CAP-1: fresh portal tokens are prepared before activation listeners',
+      () async {
+        final portal = await startPortal();
+        final prepared = <String?>[];
+        final observed = <String?>[];
+        final hotkey = buildOn(portal, onActivationToken: prepared.add);
+        hotkey.activations.listen((_) => observed.add(prepared.last));
+        await _bindAndSettle(hotkey, _ctrlShiftG);
+
+        await portal.emitActivated(
+          options: {'activation_token': const DBusString('fresh')},
+        );
+        await portal.emitActivated();
+        await portal.emitActivated(
+          options: {'activation_token': const DBusUint32(12)},
+        );
+        await portal.emitActivated(
+          options: {'activation_token': const DBusString('')},
+        );
+        await _settle();
+
+        expect(prepared, ['fresh', null, null, null]);
+        expect(observed, prepared);
+      },
+    );
+
+    test(
+      'CAP-1: another shortcut, session, or sender cannot prepare a token',
+      () async {
+        final portal = await startPortal();
+        final prepared = <String?>[];
+        final hotkey = buildOn(portal, onActivationToken: prepared.add);
+        await _bindAndSettle(hotkey, _ctrlShiftG);
+        final options = {'activation_token': const DBusString('foreign')};
+
+        await portal.emitActivated(
+          session: DBusObjectPath('/other/session'),
+          options: options,
+        );
+        await portal.emitActivated(
+          shortcutId: 'other-shortcut',
+          options: options,
+        );
+        await portal.emitActivatedFromImpostor();
+        await _settle();
+
+        expect(prepared, isEmpty);
+        await portal.emitActivated(options: options);
+        await _settle();
+        expect(prepared, ['foreign']);
+      },
+    );
+
     test('A16 CAP-1: a press reaches every listener exactly once', () async {
       final portal = await startPortal();
       final hotkey = buildOn(portal);

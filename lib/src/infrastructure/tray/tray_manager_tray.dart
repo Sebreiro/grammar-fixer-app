@@ -32,7 +32,11 @@ import 'tray_menu_entry.dart';
 /// whether the tray was installed, so this adapter is where the rule has to
 /// live.
 final class TrayManagerTray implements TrayPort {
-  TrayManagerTray({required this._icon, required this._logger}) {
+  TrayManagerTray({
+    required this._icon,
+    required this._logger,
+    this._onPanelRequest,
+  }) {
     _selections = _icon.selections.listen(
       _onSelection,
       // AD-15 backstop: the seam promises a plain stream of entry keys. One
@@ -76,6 +80,7 @@ final class TrayManagerTray implements TrayPort {
       'Global hotkey unavailable — use this menu to open the panel';
 
   final TrayIcon _icon;
+  final void Function()? _onPanelRequest;
   final Logger _logger;
   late final StreamSubscription<String> _selections;
 
@@ -279,6 +284,7 @@ final class TrayManagerTray implements TrayPort {
     }
     switch (key) {
       case _openPanelKey:
+        _onPanelRequest?.call();
         _panelRequests.add(null);
       case _quitKey:
         // The request only — the teardown belongs to the composition root, and

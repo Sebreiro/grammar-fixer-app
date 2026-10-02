@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:hotkey_grammar_corrector/src/domain/config/provider_config.dart';
@@ -60,6 +61,30 @@ void main() {
   ) => provider.correct(text: 'input under test', preset: preset).toList();
 
   group('happy path', () {
+    test('CAP-4 CAP-8: the sidecar receives the editable prompt with required '
+        'format and its paired model', () async {
+      final provider = providerForStub('''
+printf '%s\\n' "\$_request" > '${tempDir.path}/request.json'
+echo '{"type":"text","text":"FORMAL: a\\nCASUAL: b\\nSHORTER: c\\nEND\\n"}'
+echo '{"type":"done"}'
+''');
+
+      final events = await correctWith(provider);
+      final request =
+          jsonDecode(await File('${tempDir.path}/request.json').readAsString())
+              as Map<String, Object?>;
+
+      expect(events.last, isA<CorrectionCompleted>());
+      expect(request['text'], 'input under test');
+      expect(request['model'], preset.model);
+      final prompt = request['system_prompt'] as String;
+      expect(prompt, startsWith('${preset.systemPrompt}\n\n'));
+      for (final tag in ['FORMAL:', 'CASUAL:', 'SHORTER:', '\nEND\n']) {
+        expect(prompt, contains(tag));
+      }
+      expect(prompt, contains('Begin your response with FORMAL:'));
+    });
+
     test('CAP-5: tagged text plus done streams deltas then '
         'CorrectionCompleted with all three registers', () async {
       final provider = providerForStub('''

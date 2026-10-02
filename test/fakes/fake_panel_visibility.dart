@@ -11,6 +11,8 @@ final class FakePanelVisibility implements PanelVisibility {
   /// may have several independent listeners.
   final StreamController<PanelVisibilityState> _changes =
       StreamController<PanelVisibilityState>.broadcast();
+  final StreamController<void> _closeRequests =
+      StreamController<void>.broadcast();
 
   /// The departure [changes] last reported, mirroring the adapter's own record
   /// so the two agree on when a departure is news.
@@ -47,6 +49,14 @@ final class FakePanelVisibility implements PanelVisibility {
         _changes.stream,
         () => cancelError,
       );
+
+  @override
+  Stream<void> get closeRequests =>
+      CancelFailingStream<void>(_closeRequests.stream, () => cancelError);
+
+  void requestClose() => _closeRequests.add(null);
+
+  void emitCloseError(Object error) => _closeRequests.addError(error);
 
   @override
   Future<void> show() async {
@@ -143,5 +153,6 @@ final class FakePanelVisibility implements PanelVisibility {
   /// Closes the changes stream. Test teardown only — not part of the port.
   void dispose() {
     unawaited(_changes.close());
+    unawaited(_closeRequests.close());
   }
 }

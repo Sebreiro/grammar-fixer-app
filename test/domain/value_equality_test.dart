@@ -1,4 +1,5 @@
 import 'package:hotkey_grammar_corrector/src/domain/collection_equality.dart';
+import 'package:hotkey_grammar_corrector/src/domain/config/close_behavior.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/app_config.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/provider_config.dart';
 import 'package:hotkey_grammar_corrector/src/domain/correction/correction_event.dart';
@@ -36,6 +37,22 @@ import '../support/value_equality.dart';
 ///
 /// Pure Dart: no Flutter binding (AGENTS.md §7).
 void main() {
+  test('CAP-8: close behavior is part of immutable config equality', () {
+    final tray = _config();
+    final quit = tray.copyWith(closeBehavior: CloseBehavior.quit);
+    expect(tray.closeBehavior, CloseBehavior.closeToTray);
+    expect(quit, isNot(tray));
+    expectSameValue(
+      quit,
+      _config().copyWith(closeBehavior: CloseBehavior.quit),
+    );
+    expect(
+      quit.copyWith(activePresetId: 'preset-b').closeBehavior,
+      CloseBehavior.quit,
+    );
+    expect(quit.copyWith(closeBehavior: CloseBehavior.closeToTray), tray);
+  });
+
   test('HOTKEY-06: the current status includes the compositor wording in '
       'value equality', () {
     HotkeyStatus status(String? wording) => HotkeyStatus(

@@ -65,6 +65,18 @@ final class SettingsState {
   /// the surface never claims a value the store did not accept.
   final AppConfig config;
 
+  Preset? get activePreset => config.presets
+      .where((preset) => preset.id == config.activePresetId)
+      .firstOrNull;
+
+  Preset? presetForProvider(String providerId) {
+    final active = activePreset;
+    if (active?.providerId == providerId) return active;
+    return config.presets
+        .where((preset) => preset.providerId == providerId)
+        .firstOrNull;
+  }
+
   /// The selected prompt/model pair is the only one this form may edit.
   Preset? get compatiblePreset => config.presets
       .where(

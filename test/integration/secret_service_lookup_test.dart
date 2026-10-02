@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dbus/dbus.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/secret_store.dart';
+import 'package:hotkey_grammar_corrector/src/domain/config/secret_write_result.dart';
 import 'package:hotkey_grammar_corrector/src/infrastructure/correction/secret_service_secret_store.dart';
 import 'package:test/test.dart';
 
@@ -15,6 +16,7 @@ void main() {
   SecretServiceSecretStore store() => SecretServiceSecretStore(
     connect: bus.client,
     lookupTimeout: const Duration(seconds: 2),
+    promptTimeout: const Duration(milliseconds: 150),
   );
 
   test('CAP-8: an unlocked matching key is read through a fresh session '
@@ -90,6 +92,134 @@ void main() {
     );
     expect(bus.calls.last, 'Close');
   });
+
+  test(
+    'CAP-8: a keyring write replaces the matching key and can be read back',
+    () async {
+      expect(
+        await store().writeProviderKey('openai-compatible', ' first-key '),
+        SecretWriteResult.saved,
+      );
+      expect(bus.calls, [
+        'SearchItems',
+        'ReadAlias',
+        'Unlock',
+        'OpenSession',
+        'CreateItem',
+        'Close',
+      ]);
+      expect(bus.attributes, {
+        'application': 'hotkey-grammar-corrector',
+        'provider': 'openai-compatible',
+      });
+      expect(bus.replace, isTrue);
+      expect(bus.secret, 'first-key');
+      expect(
+        await store().writeProviderKey('openai-compatible', 'replacement-key'),
+        SecretWriteResult.saved,
+      );
+      final read = await store().readProviderKey('openai-compatible');
+      expect(
+        read,
+        isA<SecretFound>().having(
+          (found) => found.value,
+          'key',
+          'replacement-key',
+        ),
+      );
+      expect(bus.itemCount, 1);
+    },
+  );
+
+  test(
+    'CAP-8: existing keys in another collection are updated without creating a duplicate',
+    () async {
+      bus.unlocked = [_SecretBus.item];
+      bus.secret = 'old-key';
+      bus.itemCount = 1;
+      bus.caseName = 'alias-missing';
+      expect(
+        await store().writeProviderKey('openai-compatible', 'new-key'),
+        SecretWriteResult.saved,
+      );
+      expect(bus.calls, [
+        'SearchItems',
+        'Unlock',
+        'OpenSession',
+        'SetSecret',
+        'Close',
+      ]);
+      expect(bus.secret, 'new-key');
+      expect(bus.itemCount, 1);
+    },
+  );
+
+  test('CAP-13: unavailable keyring writes never claim success', () async {
+    for (final failure in [
+      'alias-missing',
+      'unlock-refused',
+      'open',
+      'create',
+    ]) {
+      bus.caseName = failure;
+      bus.calls.clear();
+      expect(
+        await store().writeProviderKey('openai-compatible', 'private-key'),
+        SecretWriteResult.unavailable,
+        reason: failure,
+      );
+      expect(bus.secret, isEmpty);
+      if (failure == 'create') expect(bus.calls.last, 'Close');
+    }
+    bus.calls.clear();
+    expect(
+      await store().writeProviderKey('openai-compatible', ' '),
+      SecretWriteResult.unavailable,
+    );
+    expect(bus.calls, isEmpty);
+  });
+
+  test(
+    'CAP-8: immediate unlock and create prompts complete without losing signals',
+    () async {
+      for (final operation in ['unlock-prompt', 'create-prompt']) {
+        bus.caseName = operation;
+        bus.calls.clear();
+        bus.unlocked = [];
+        expect(
+          await store().writeProviderKey('openai-compatible', 'private-key'),
+          SecretWriteResult.saved,
+          reason: operation,
+        );
+        expect(bus.calls, contains('Prompt'));
+        expect(bus.calls.last, 'Close');
+      }
+    },
+  );
+
+  test(
+    'CAP-13: dismissed and timed-out keyring prompts fail and clean up',
+    () async {
+      for (final failure in [
+        'prompt-dismissed',
+        'prompt-timeout',
+        'prompt-invalid',
+      ]) {
+        bus.caseName = failure;
+        bus.calls.clear();
+        expect(
+          await store().writeProviderKey('openai-compatible', 'private-key'),
+          SecretWriteResult.unavailable,
+          reason: failure,
+        );
+        expect(bus.calls, contains('Prompt'));
+        if (failure != 'prompt-dismissed') {
+          expect(bus.calls, contains('Dismiss'));
+        }
+        expect(bus.secret, isEmpty);
+      }
+    },
+  );
 }
 
 final class _SecretBus {
@@ -100,6 +230,10 @@ final class _SecretBus {
   static final wrongSession = DBusObjectPath(
     '/org/freedesktop/secrets/session/other',
   );
+  static final collection = DBusObjectPath(
+    '/org/freedesktop/secrets/collection/default',
+  );
+  static final prompt = DBusObjectPath('/org/freedesktop/secrets/prompt/1');
 
   final Directory directory;
   final DBusServer server;
@@ -112,6 +246,8 @@ final class _SecretBus {
   String caseName = '';
   final List<String> calls = [];
   Map<String, String> attributes = {};
+  bool replace = false;
+  int itemCount = 0;
 
   static Future<_SecretBus> start() async {
     final directory = Directory.systemTemp.createTempSync(
@@ -126,6 +262,9 @@ final class _SecretBus {
     await service.requestName('org.freedesktop.secrets');
     await service.registerObject(_ServiceObject(bus));
     await service.registerObject(_SessionObject(bus));
+    await service.registerObject(_ItemObject(bus));
+    await service.registerObject(_CollectionObject(bus));
+    await service.registerObject(_PromptObject(bus));
     return bus;
   }
 
@@ -193,6 +332,63 @@ final class _SecretBus {
     }
     return DBusMethodSuccessResponse();
   }
+
+  DBusMethodResponse alias() {
+    calls.add('ReadAlias');
+    return DBusMethodSuccessResponse([
+      caseName == 'alias-missing' ? DBusObjectPath('/') : collection,
+    ]);
+  }
+
+  List<DBusObjectPath> unlockTargets = [];
+
+  DBusMethodResponse unlock(DBusMethodCall call) {
+    calls.add('Unlock');
+    unlockTargets = call.values.single.asObjectPathArray().toList();
+    final prompting = [
+      'unlock-prompt',
+      'prompt-dismissed',
+      'prompt-timeout',
+      'prompt-invalid',
+    ].contains(caseName);
+    return DBusMethodSuccessResponse([
+      DBusArray.objectPath(
+        caseName == 'unlock-refused' || prompting ? [] : unlockTargets,
+      ),
+      prompting ? prompt : DBusObjectPath('/'),
+    ]);
+  }
+
+  DBusMethodResponse set(DBusMethodCall call) {
+    calls.add('SetSecret');
+    final fields = call.values.single.asStruct();
+    expect(fields[0].asObjectPath(), session);
+    secret = utf8.decode(fields[2].asByteArray().toList());
+    return DBusMethodSuccessResponse();
+  }
+
+  DBusMethodResponse create(DBusMethodCall call) {
+    calls.add('CreateItem');
+    if (caseName == 'create') return DBusMethodErrorResponse.failed();
+    final properties = call.values[0].asStringVariantDict();
+    attributes = {
+      for (final entry
+          in properties['org.freedesktop.Secret.Item.Attributes']!
+              .asDict()
+              .entries)
+        entry.key.asString(): entry.value.asString(),
+    };
+    replace = call.values[2].asBoolean();
+    final fields = call.values[1].asStruct();
+    expect(fields[0].asObjectPath(), session);
+    secret = utf8.decode(fields[2].asByteArray().toList());
+    unlocked = [item];
+    itemCount = 1;
+    return DBusMethodSuccessResponse([
+      caseName == 'create-prompt' ? DBusObjectPath('/') : item,
+      caseName == 'create-prompt' ? prompt : DBusObjectPath('/'),
+    ]);
+  }
 }
 
 final class _ServiceObject extends DBusObject {
@@ -206,6 +402,8 @@ final class _ServiceObject extends DBusObject {
         'SearchItems' => bus.search(call),
         'OpenSession' => bus.open(),
         'GetSecrets' => bus.get(),
+        'ReadAlias' => bus.alias(),
+        'Unlock' => bus.unlock(call),
         _ => DBusMethodErrorResponse.unknownMethod(),
       };
 }
@@ -220,4 +418,50 @@ final class _SessionObject extends DBusObject {
       call.name == 'Close'
       ? bus.close()
       : DBusMethodErrorResponse.unknownMethod();
+}
+
+final class _CollectionObject extends DBusObject {
+  _CollectionObject(this.bus) : super(_SecretBus.collection);
+  final _SecretBus bus;
+
+  @override
+  Future<DBusMethodResponse> handleMethodCall(DBusMethodCall call) async =>
+      call.name == 'CreateItem'
+      ? bus.create(call)
+      : DBusMethodErrorResponse.unknownMethod();
+}
+
+final class _ItemObject extends DBusObject {
+  _ItemObject(this.bus) : super(_SecretBus.item);
+  final _SecretBus bus;
+
+  @override
+  Future<DBusMethodResponse> handleMethodCall(DBusMethodCall call) async =>
+      call.name == 'SetSecret'
+      ? bus.set(call)
+      : DBusMethodErrorResponse.unknownMethod();
+}
+
+final class _PromptObject extends DBusObject {
+  _PromptObject(this.bus) : super(_SecretBus.prompt);
+  final _SecretBus bus;
+
+  @override
+  Future<DBusMethodResponse> handleMethodCall(DBusMethodCall call) async {
+    bus.calls.add(call.name);
+    if (call.name == 'Dismiss') return DBusMethodSuccessResponse();
+    if (call.name != 'Prompt') return DBusMethodErrorResponse.unknownMethod();
+    if (bus.caseName == 'prompt-timeout') return DBusMethodSuccessResponse();
+    await emitSignal('org.freedesktop.Secret.Prompt', 'Completed', [
+      bus.caseName == 'prompt-invalid'
+          ? const DBusString('invalid')
+          : DBusBoolean(bus.caseName == 'prompt-dismissed'),
+      DBusVariant(
+        bus.caseName == 'create-prompt'
+            ? _SecretBus.item
+            : DBusArray.objectPath(bus.unlockTargets),
+      ),
+    ]);
+    return DBusMethodSuccessResponse();
+  }
 }

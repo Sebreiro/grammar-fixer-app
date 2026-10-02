@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hotkey_grammar_corrector/src/domain/config/close_behavior.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/provider_config.dart';
 import 'package:hotkey_grammar_corrector/src/domain/correction/preset.dart';
 import 'package:hotkey_grammar_corrector/src/domain/hotkey/hotkey_bind_outcome.dart';
@@ -21,7 +22,7 @@ import '../settings_harness.dart';
 ///
 /// Every mutation here goes through `SettingsController`, which is the only path
 /// to the config file (AD-13) — so what these rows check is what the *screen*
-/// adds: that a preset is what is chosen and never a provider, that a failure is
+/// adds: that provider choices activate complete presets, that a failure is
 /// rendered where a user will find it, and that the store's `current` is what is
 /// shown when a write did not land.
 void main() {
@@ -79,6 +80,117 @@ void main() {
       activePresetId: compatiblePreset.id,
     );
   }
+
+  testWidgets(
+    'CAP-8: the log size saves through settings and reflects config edits',
+    (tester) async {
+      await harness.pumpSettings(tester);
+      final choice = find.byType(DropdownButton<int>);
+      await tester.ensureVisible(choice);
+      await tester.tap(choice);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('5 MiB').last);
+      await tester.pumpAndSettle();
+      expect(harness.configStore.current.logMaxBytes, 5242880);
+      await harness.configStore.write(
+        harness.configStore.current.copyWith(logMaxBytes: 2048),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.widget<DropdownButton<int>>(choice).value, 2048);
+      expect(find.text('2048 bytes'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'CAP-8: a failed log size write keeps the saved limit and reports failure',
+    (tester) async {
+      await harness.pumpSettings(tester);
+      harness.configStore.writeError = StateError('disk refused the write');
+      final choice = find.byType(DropdownButton<int>);
+      await tester.ensureVisible(choice);
+      await tester.tap(choice);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('5 MiB').last);
+      await tester.pumpAndSettle();
+      expect(harness.configStore.current.logMaxBytes, 1048576);
+      expect(tester.widget<DropdownButton<int>>(choice).value, 1048576);
+      expect(find.byType(SettingsFailureNotice), findsOneWidget);
+    },
+  );
+
+  final closeChoice = find.byType(DropdownButton<CloseBehavior>);
+
+  Future<void> chooseQuit(WidgetTester tester) async {
+    await tester.tap(closeChoice);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Quit app').last);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('CAP-8: close preference defaults to tray and saves quit', (
+    tester,
+  ) async {
+    await harness.pumpSettings(tester);
+    expect(
+      tester.widget<DropdownButton<CloseBehavior>>(closeChoice).value,
+      CloseBehavior.closeToTray,
+    );
+    await chooseQuit(tester);
+    expect(harness.configStore.current.closeBehavior, CloseBehavior.quit);
+    expect(
+      tester.widget<DropdownButton<CloseBehavior>>(closeChoice).value,
+      CloseBehavior.quit,
+    );
+  });
+
+  testWidgets('CAP-8: an external close preference edit appears in settings', (
+    tester,
+  ) async {
+    await harness.pumpSettings(tester);
+    await harness.configStore.write(
+      harness.configStore.current.copyWith(closeBehavior: CloseBehavior.quit),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<DropdownButton<CloseBehavior>>(closeChoice).value,
+      CloseBehavior.quit,
+    );
+  });
+
+  testWidgets(
+    'CAP-8: a failed close preference selection renders the saved value',
+    (tester) async {
+      await harness.pumpSettings(tester);
+      harness.configStore.writeError = StateError('disk refused the write');
+      await chooseQuit(tester);
+      expect(find.byType(SettingsFailureNotice), findsOneWidget);
+      expect(
+        tester.widget<DropdownButton<CloseBehavior>>(closeChoice).value,
+        CloseBehavior.closeToTray,
+      );
+    },
+  );
+
+  testWidgets('CAP-8: the close preference is disabled while saving', (
+    tester,
+  ) async {
+    await harness.pumpSettings(tester);
+    final gate = Completer<void>();
+    harness.configStore.writeGate = gate;
+    final pending = harness.settings.changeCloseBehavior(CloseBehavior.quit);
+    await tester.pump();
+    expect(
+      tester.widget<DropdownButton<CloseBehavior>>(closeChoice).onChanged,
+      isNull,
+    );
+    gate.complete();
+    await pending;
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<DropdownButton<CloseBehavior>>(closeChoice).onChanged,
+      isNotNull,
+    );
+  });
 
   testWidgets('CAP-8: a plaintext config key source is disclosed and the '
       'warning clears when the source moves to the keyring', (tester) async {
@@ -181,6 +293,17 @@ void main() {
   /// hits nothing and the row goes on to assert against a mutation that never
   /// happened.
   Future<void> pick(WidgetTester tester, String presetId) async {
+    if (optionFor(presetId).evaluate().isEmpty) {
+      final preset = harness.configStore.current.presets.firstWhere(
+        (preset) => preset.id == presetId,
+      );
+      final provider = find.byKey(ValueKey('provider-${preset.providerId}'));
+      await tester.ensureVisible(provider);
+      await tester.pumpAndSettle();
+      await tester.tap(provider);
+      await tester.pumpAndSettle();
+      if (harness.state.failure != null) return;
+    }
     await tester.ensureVisible(optionFor(presetId));
     await tester.pumpAndSettle();
     await tester.tap(optionFor(presetId));
@@ -217,21 +340,27 @@ void main() {
     );
   });
 
-  testWidgets('A15 CAP-8: every option names the provider and model it would '
-      'switch to', (tester) async {
-    await harness.pumpSettings(tester);
+  testWidgets(
+    'A15 CAP-8: selected-provider options name their provider and model',
+    (tester) async {
+      await harness.pumpSettings(tester);
 
-    for (final preset in SettingsHarness.defaultConfig.presets) {
-      expect(find.text(preset.id), findsOneWidget);
-      expect(
-        find.text('${preset.providerId} · ${preset.model}'),
-        findsOneWidget,
-        reason:
-            'CAP-8 is about which backend serves the next correction, so the '
-            'backend has to be visible in the choice',
-      );
-    }
-  });
+      for (final preset in SettingsHarness.defaultConfig.presets) {
+        if (preset.providerId != harness.state.activePreset?.providerId) {
+          expect(find.text(preset.id), findsNothing);
+          continue;
+        }
+        expect(find.text(preset.id), findsOneWidget);
+        expect(
+          find.text('${preset.providerId} · ${preset.model}'),
+          findsOneWidget,
+          reason:
+              'CAP-8 is about which backend serves the next correction, so the '
+              'backend has to be visible in the choice',
+        );
+      }
+    },
+  );
 
   testWidgets('A16 CAP-8: the screen states that the next correction uses the '
       'selected preset', (tester) async {
@@ -392,11 +521,12 @@ void main() {
     harness.configStore.writeGate = disk;
     await harness.pumpSettings(tester);
 
+    await tester.ensureVisible(optionFor(SettingsHarness.fastPreset.id));
+    await tester.pumpAndSettle();
     await tester.tap(optionFor(SettingsHarness.fastPreset.id));
-    await tester.tap(
-      optionFor(SettingsHarness.localPreset.id),
-      warnIfMissed: false,
-    );
+    tester
+        .widget<RadioGroup<String>>(find.byType(RadioGroup<String>))
+        .onChanged(SettingsHarness.localPreset.providerId);
     disk.complete();
     await tester.pumpAndSettle();
 

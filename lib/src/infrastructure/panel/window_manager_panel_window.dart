@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:window_manager/window_manager.dart';
 
+import 'panel_activation.dart';
+import 'panel_activation_presenter.dart';
 import 'panel_window.dart';
 
 /// [PanelWindow] over `window_manager` — the one file in `lib/` that names the
@@ -25,13 +27,15 @@ import 'panel_window.dart';
 final class WindowManagerPanelWindow
     with WindowListener
     implements PanelWindow {
-  WindowManagerPanelWindow() {
+  WindowManagerPanelWindow({this._activationPresenter}) {
     windowManager.addListener(this);
   }
 
   /// Broadcast so the seam does not impose a one-listener rule of its own on
   /// top of the port's.
   final StreamController<String> _events = StreamController<String>.broadcast();
+
+  final PanelActivationPresenter? _activationPresenter;
 
   bool _disposed = false;
   bool _focused = false;
@@ -88,14 +92,19 @@ final class WindowManagerPanelWindow
   }
 
   @override
-  Future<void> focus() async {
+  Future<void> focus({PanelActivation? activation}) async {
     if (_disposed) {
       return;
     }
     if (!_focused) {
       _selfFocusPending = true;
     }
-    await windowManager.focus();
+    final presenter = _activationPresenter;
+    if (presenter == null) {
+      await windowManager.focus();
+      return;
+    }
+    await presenter.present(activation);
   }
 
   @override

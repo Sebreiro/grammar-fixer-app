@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/config/app_config.dart';
 import '../../domain/config/provider_config.dart';
+import '../../domain/config/provider_key_writer.dart';
 import '../../domain/correction/correction_provider.dart';
 import '../../domain/correction/preset.dart';
 import '../../domain/hotkey/hotkey_bind_outcome.dart';
@@ -11,6 +12,7 @@ import '../../domain/logger.dart';
 import '../../domain/tray/tray_port.dart';
 import '../correction_controller.dart';
 import '../panel_controller.dart';
+import '../panel_close_controller.dart';
 import '../settings_controller.dart';
 import '../settings_state.dart';
 import 'controller_providers.dart';
@@ -30,6 +32,8 @@ final class DaemonGraph {
     this.tray,
     this.activePairForConfig,
     this.apiKeySourceLabel,
+    this.providerKeyWriter,
+    this.onConfigApplied,
   });
 
   final ProviderContainer container;
@@ -38,6 +42,8 @@ final class DaemonGraph {
   final ({CorrectionProvider provider, Preset preset}) Function(AppConfig)?
   activePairForConfig;
   final Future<String> Function(ProviderConfig)? apiKeySourceLabel;
+  final ProviderKeyWriter? providerKeyWriter;
+  final void Function(AppConfig)? onConfigApplied;
 
   /// The controllers [build] constructed, held rather than re-read.
   ///
@@ -48,11 +54,12 @@ final class DaemonGraph {
   /// tear down nothing instead.
   CorrectionController? _correction;
   PanelController? _panel;
+  PanelCloseController? _panelClose;
   SettingsController? _settings;
   StreamSubscription<SettingsState>? _hotkeyStatusChanges;
   Future<void> _trayUpdates = Future<void>.value();
 
-  /// Constructs all three controllers now, rather than on first read.
+  /// Constructs every controller now, rather than on first read.
   ///
   /// A controller is a subscription: `CorrectionController` has to be
   /// listening to panel visibility before the first show and `PanelController`
@@ -62,9 +69,12 @@ final class DaemonGraph {
   void build() {
     _correction = container.read(correctionControllerProvider);
     _panel = container.read(panelControllerProvider);
+    _panelClose = container.read(panelCloseControllerProvider);
     _settings = container.read(settingsControllerProvider);
     final keySource = apiKeySourceLabel;
     if (keySource != null) _settings?.attachApiKeySourceLabel(keySource);
+    final keyWriter = providerKeyWriter;
+    if (keyWriter != null) _settings?.attachProviderKeyWriter(keyWriter);
     _settings?.attachConfigListener(_applyActiveConfig);
     if (tray != null) {
       _hotkeyStatusChanges = _settings?.changes.listen((_) {
@@ -75,6 +85,7 @@ final class DaemonGraph {
   }
 
   void _applyActiveConfig(AppConfig config) {
+    onConfigApplied?.call(config);
     final resolve = activePairForConfig;
     final correction = _correction;
     if (resolve == null || correction == null) {
@@ -144,7 +155,10 @@ final class DaemonGraph {
   /// there is no panel yet, so there is nothing to raise.
   void showPanel() => _panel?.showPanel();
 
-  /// Disposes the three controllers, correction first.
+  Stream<void> get quitRequests =>
+      _panelClose?.quitRequests ?? const Stream<void>.empty();
+
+  /// Disposes the controllers, correction first.
   ///
   /// Correction leads because it is the one that waits: its `dispose()` drains
   /// the CAP-7 history writes still in flight, and draining them while the
@@ -162,6 +176,7 @@ final class DaemonGraph {
     await _dispose('pending tray status updates', () => _trayUpdates);
     await _dispose('the correction controller', _correction?.dispose);
     await _dispose('the panel controller', _panel?.dispose);
+    await _dispose('the panel close controller', _panelClose?.dispose);
     await _dispose('the settings controller', _settings?.dispose);
   }
 

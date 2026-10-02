@@ -87,6 +87,7 @@ final class DaemonStartup {
     required HotkeyRegistrar registrar,
     required PortalAppIdRegime portalAppIdRegime,
     required Duration requestTimeout,
+    void Function(String? token)? onActivationToken,
   }) async {
     final lock = SingleInstanceLock(paths: paths);
     try {
@@ -138,6 +139,7 @@ final class DaemonStartup {
           appIdRegime: portalAppIdRegime,
           requestTimeout: requestTimeout,
           logger: logger,
+          onActivationToken: onActivationToken,
         ),
         focusWitness: _focusWitnessFor(displayServer),
         // AD-5: the single active pair, resolved through AD-15's registry map.
@@ -322,6 +324,7 @@ final class DaemonStartup {
     required PortalAppIdRegime appIdRegime,
     required Duration requestTimeout,
     required Logger logger,
+    void Function(String? token)? onActivationToken,
   }) {
     return switch (displayServer) {
       // The registrar is deliberately unused here: it is the X11 key-grab seam,
@@ -336,6 +339,7 @@ final class DaemonStartup {
         appIdRegime: appIdRegime,
         requestTimeout: requestTimeout,
         logger: logger,
+        onActivationToken: onActivationToken,
       ),
       DisplayServer.x11 => X11GlobalHotkey(
         registrar: registrar,

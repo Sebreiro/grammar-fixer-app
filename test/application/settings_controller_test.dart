@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:hotkey_grammar_corrector/src/application/settings_controller.dart';
 import 'package:hotkey_grammar_corrector/src/application/settings_state.dart';
+import 'package:hotkey_grammar_corrector/src/domain/config/close_behavior.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/app_config.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/config_load_result.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/config_store.dart';
@@ -48,6 +49,83 @@ void main() {
   tearDown(() async {
     await controller.dispose();
     configStore.dispose();
+  });
+
+  group('close preference (CAP-8)', () {
+    test(
+      'CAP-8: changing close behavior writes through without rebinding',
+      () async {
+        await controller.changeCloseBehavior(CloseBehavior.quit);
+        expect(configStore.current.closeBehavior, CloseBehavior.quit);
+        expect(
+          configStore.writes.single,
+          _config.copyWith(closeBehavior: CloseBehavior.quit),
+        );
+        expect(controller.state.config, configStore.current);
+        expect(hotkey.bindCalls, isEmpty);
+      },
+    );
+
+    test(
+      'CAP-8: failed close preference stays committed until a retry succeeds',
+      () async {
+        configStore.writeError = StateError('disk refused the write');
+        await controller.changeCloseBehavior(CloseBehavior.quit);
+        expect(
+          controller.state.config.closeBehavior,
+          CloseBehavior.closeToTray,
+        );
+        expect(
+          controller.state.failure?.kind,
+          SettingsFailureKind.configWriteFailed,
+        );
+        expect(controller.state.mutationInFlight, isFalse);
+        configStore.writeError = null;
+        await controller.changeCloseBehavior(CloseBehavior.quit);
+        expect(controller.state.failure, isNull);
+        expect(controller.state.config.closeBehavior, CloseBehavior.quit);
+      },
+    );
+
+    test(
+      'CAP-8: external close preference updates the settings surface',
+      () async {
+        await configStore.write(
+          configStore.current.copyWith(closeBehavior: CloseBehavior.quit),
+        );
+        await pumpEventQueue();
+        expect(controller.state.config.closeBehavior, CloseBehavior.quit);
+        expect(hotkey.bindCalls, isEmpty);
+      },
+    );
+
+    test(
+      'CAP-8: changing another setting retains a close preference failure',
+      () async {
+        configStore.writeError = StateError('disk refused the write');
+        await controller.changeCloseBehavior(CloseBehavior.quit);
+        final failure = controller.state.failure;
+        configStore.writeError = null;
+        await controller.changeActivePreset(_config.activePresetId);
+        expect(controller.state.failure, failure);
+      },
+    );
+
+    test(
+      'CAP-8: close preference shares the mutation lock with other settings',
+      () async {
+        final gate = Completer<void>();
+        configStore.writeGate = gate;
+        final pending = controller.changeCloseBehavior(CloseBehavior.quit);
+        expect(controller.state.mutationInFlight, isTrue);
+        await controller.changeCloseBehavior(CloseBehavior.closeToTray);
+        gate.complete();
+        await pending;
+        expect(configStore.writes, hasLength(1));
+        expect(controller.state.config.closeBehavior, CloseBehavior.quit);
+        expect(controller.state.mutationInFlight, isFalse);
+      },
+    );
   });
 
   test('CAP-12: changing the hotkey writes the chosen combination through '

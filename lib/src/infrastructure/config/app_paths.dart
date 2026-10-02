@@ -8,6 +8,7 @@
 final class AppPaths {
   const AppPaths._({
     required this.configFile,
+    required this.logFile,
     required this.databaseFile,
     required this.runtimeDirectory,
     required this.warning,
@@ -40,6 +41,8 @@ final class AppPaths {
     final runtimeDirectory = _runtimeDirectory(environment, warnings);
     return AppPaths._(
       configFile: '$configHome/$applicationDirectoryName/$configFileName',
+      logFile:
+          '$configHome/$applicationDirectoryName/logs/grammmar-corrector.log',
       databaseFile: '$dataHome/$applicationDirectoryName/$databaseFileName',
       runtimeDirectory: runtimeDirectory,
       warning: warnings.isEmpty ? null : warnings.join('; '),
@@ -59,6 +62,9 @@ final class AppPaths {
 
   /// `${XDG_CONFIG_HOME:-$HOME/.config}/…/`[configFileName].
   final String configFile;
+
+  /// Cyclic diagnostics beside the config file, under `logs/`.
+  final String logFile;
 
   /// `${XDG_DATA_HOME:-$HOME/.local/share}/…/`[databaseFileName].
   final String databaseFile;

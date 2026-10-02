@@ -18,18 +18,22 @@ import 'src/domain/logger.dart';
 import 'src/domain/tray/tray_port.dart';
 import 'src/infrastructure/clipboard/system_clipboard.dart';
 import 'src/infrastructure/config/app_paths.dart';
+import 'src/infrastructure/config/config_fallback_provider_key_writer.dart';
 import 'src/infrastructure/correction/active_correction.dart';
 import 'src/infrastructure/correction/provider_registry.dart';
+import 'src/infrastructure/correction/secret_service_secret_store.dart';
 import 'src/infrastructure/hotkey/hotkey_key_catalogue.dart';
 import 'src/infrastructure/hotkey/hotkey_registrar.dart';
 import 'src/infrastructure/hotkey/portal_app_id_regime.dart';
 import 'src/infrastructure/hotkey/x11_key_grab_registrar.dart';
+import 'src/infrastructure/panel/gtk_panel_activation_presenter.dart';
+import 'src/infrastructure/panel/panel_activation_context.dart';
 import 'src/infrastructure/panel/window_manager_panel_visibility.dart';
 import 'src/infrastructure/panel/window_manager_panel_window.dart';
 import 'src/infrastructure/persistence/drift_correction_repository.dart';
 import 'src/infrastructure/system/daemon_lifecycle.dart';
 import 'src/infrastructure/system/daemon_startup.dart';
-import 'src/infrastructure/system/stderr_logger.dart';
+import 'src/infrastructure/system/file_logger.dart';
 import 'src/infrastructure/system/system_clock.dart';
 import 'src/infrastructure/tray/tray_manager_tray.dart';
 import 'src/infrastructure/tray/tray_manager_tray_icon.dart';
@@ -51,7 +55,13 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   const clock = SystemClock();
-  final logger = StderrLogger(clock: clock);
+  final logger = FileLogger(clock: clock);
+  Future<void> closeLogs() => runBoundedReleaseStep(
+    name: 'closing the log file',
+    release: logger.close,
+    timeout: _unresponsiveCallBudget,
+    logger: logger,
+  );
   // Immediately, so the two framework channels are covered for the whole
   // process rather than from `runApp` onwards: a throw inside a widget build
   // or an uncaught async error is reported by the framework, not raised into
@@ -69,6 +79,9 @@ Future<void> main() async {
   // launch that exits 0 here has cost the session nothing — and neither has a
   // Wayland session, which never asks this arm for a grab at all.
   final hotkeyRegistrar = X11KeyGrabRegistrar();
+  final activationContext = PanelActivationContext();
+  const activationPresenter = GtkPanelActivationPresenter();
+  AppPaths? resolvedPaths;
   DaemonStartup? startup;
   DaemonLifecycle? lifecycle;
   // Capture each resource before the next construction or await can throw.
@@ -78,8 +91,10 @@ Future<void> main() async {
   TrayManagerTray? openedTray;
   DaemonGraph? openedGraph;
   try {
+    final paths = AppPaths.fromEnvironment(Platform.environment);
+    resolvedPaths = paths;
     startup = await DaemonStartup.begin(
-      paths: AppPaths.fromEnvironment(Platform.environment),
+      paths: paths,
       environment: Platform.environment,
       logger: logger,
       registrar: hotkeyRegistrar,
@@ -99,17 +114,27 @@ Future<void> main() async {
       // "a few seconds" is the same policy question the panel adapter and the
       // teardown already answered once.
       requestTimeout: _unresponsiveCallBudget,
+      onActivationToken: activationContext.preparePortal,
     );
     if (startup == null) {
       // Returning from main leaves the GTK loop resident after the holder was
       // signalled. A failed exit is caught by this same abort guard.
+      await closeLogs();
       exit(0);
     }
 
+    // Only the lock holder writes the cyclic file. Startup diagnostics wait
+    // in the logger until its path and validated size limit are available.
+    await logger.open(paths.logFile);
+    logger.configureMaxBytes(startup.configStore.current.logMaxBytes);
     // The address is now held, and every later step shares this guard.
     final trayIcon = TrayManagerTrayIcon();
     openedTrayIcon = trayIcon;
-    final tray = TrayManagerTray(icon: trayIcon, logger: logger);
+    final tray = TrayManagerTray(
+      icon: trayIcon,
+      logger: logger,
+      onPanelRequest: activationContext.prepareTray,
+    );
     openedTray = tray;
     // Built here, before the window is prepared and long before `runApp`,
     // because its constructor is what registers the window listener and an
@@ -117,7 +142,10 @@ Future<void> main() async {
     // `windowManager.ensureInitialized()`: on Linux that answers a bare `true`
     // and connects nothing, so it orders nothing either.
     final panelVisibility = WindowManagerPanelVisibility(
-      window: WindowManagerPanelWindow(),
+      window: WindowManagerPanelWindow(
+        activationPresenter: activationPresenter,
+      ),
+      activationContext: activationContext,
       // Chosen by `DaemonStartup` from the one display-server read AD-9's
       // hotkey adapter is chosen by, so the two answers cannot disagree. The
       // adapter owns it from here: `dispose()` disposes it, and nothing else
@@ -141,6 +169,11 @@ Future<void> main() async {
       tray: tray,
       apiKeySourceLabel: (config) async =>
           (await apiKeyResolver.sourceForSettings(config)).settingsLabel,
+      onConfigApplied: (config) => logger.configureMaxBytes(config.logMaxBytes),
+      providerKeyWriter: ConfigFallbackProviderKeyWriter(
+        keyring: const SecretServiceSecretStore(),
+        configStore: startup.configStore,
+      ),
       activePairForConfig: (config) {
         final active = ActiveCorrection.resolve(
           config: config,
@@ -181,13 +214,19 @@ Future<void> main() async {
     // slowest steps in startup, and a stop signal arriving during either must
     // still reach the ordered teardown rather than killing the daemon with a
     // history write in flight.
-    _installSignalHandlers(lifecycle);
+    _installSignalHandlers(lifecycle, closeLogs, logger);
     // Immediately after, and for the same reason: the tray menu's Quit entry is
     // the daemon's second exit trigger, and it reaches the identical teardown.
     // The menu it belongs to is not pushed until `tray.install()` further down,
     // so nothing can be picked before this subscription exists — but the
     // ordering is stated here rather than relied on there.
-    _installQuitHandler(tray: tray, lifecycle: lifecycle);
+    _installQuitHandler(
+      tray: tray,
+      lifecycle: lifecycle,
+      panelQuitRequests: graph.quitRequests,
+      closeLogs: closeLogs,
+      logger: logger,
+    );
 
     try {
       await _finishStartup(
@@ -196,11 +235,14 @@ Future<void> main() async {
         tray: tray,
         lifecycle: lifecycle,
         logger: logger,
+        activationPresenter: activationPresenter,
       );
     } finally {
       lifecycle.finishStartup();
     }
   } on Object catch (error) {
+    final paths = resolvedPaths;
+    if (paths != null) await logger.open(paths.logFile);
     await _abort(
       error: error,
       lifecycle: lifecycle,
@@ -211,6 +253,7 @@ Future<void> main() async {
       hotkeyRegistrar: hotkeyRegistrar,
       startup: startup,
       logger: logger,
+      closeLogs: closeLogs,
     );
   }
 }
@@ -281,11 +324,20 @@ Future<void> _finishStartup({
   required TrayPort tray,
   required DaemonLifecycle lifecycle,
   required Logger logger,
+  required GtkPanelActivationPresenter activationPresenter,
 }) async {
   if (lifecycle.isShuttingDown) {
     return;
   }
   await _createHiddenWindow();
+  try {
+    await activationPresenter.initialize().timeout(_unresponsiveCallBudget);
+  } on Object catch (error) {
+    logger.warning(
+      'desktop activation tokens could not be initialized',
+      context: {'error_type': error.runtimeType.toString()},
+    );
+  }
   if (lifecycle.isShuttingDown) {
     return;
   }
@@ -505,6 +557,7 @@ Future<void> _abort({
   required DaemonStartup? startup,
   required Logger logger,
   Duration stepTimeout = _unresponsiveCallBudget,
+  required Future<void> Function() closeLogs,
 }) async {
   // Through `_log`, like every other log on this path, and now load-bearing:
   // `_installErrorHandlers` answers `true` for everything that reaches the root
@@ -551,7 +604,8 @@ Future<void> _abort({
       );
     }
   } finally {
-    // Even a broken cleanup step must not leave the GTK loop resident.
+    // Drain diagnostics after every cleanup step has had a chance to log.
+    await closeLogs();
     exit(1);
   }
 }
@@ -675,8 +729,8 @@ Future<void> _createHiddenWindow() async {
   await windowManager.ensureInitialized();
   final geometry = _initialPanelGeometry();
   await windowManager.setTitle('Hotkey Grammar Corrector');
-  // A tray daemon has no business in the task switcher while it is hidden.
-  await windowManager.setSkipTaskbar(true);
+  // Prepare taskbar eligibility once so summoning adds no window setup.
+  await windowManager.setSkipTaskbar(false);
   // Geometry is prepared on the hidden toplevel, before any hotkey can summon
   // it. These calls configure GTK's size hints and bounds; none presents it.
   // The display snapshot is best effort: Wayland owns ordinary toplevel
@@ -852,7 +906,11 @@ void _installErrorHandlers(Logger logger) {
 /// The `exit(0)` is here rather than inside that method for the same reason
 /// the graph is: a function that ends the process cannot be run by a test, and
 /// the teardown order is the part worth testing.
-void _installSignalHandlers(DaemonLifecycle lifecycle) {
+void _installSignalHandlers(
+  DaemonLifecycle lifecycle,
+  Future<void> Function() closeLogs,
+  Logger logger,
+) {
   // SIGHUP belongs here with the other two: its default disposition terminates
   // the process outright, and it is what a terminal close or an X-session
   // logout delivers — the logout this method's own doc names. Without it that
@@ -868,12 +926,13 @@ void _installSignalHandlers(DaemonLifecycle lifecycle) {
         // Say so, so an operator watching a slow stop knows the signal landed
         // and the daemon is draining rather than ignoring them.
         _log(
-          () => stderr.writeln(
+          () => logger.info(
             'received a second stop signal; already shutting down',
           ),
         );
       }
       await lifecycle.shutdown();
+      await closeLogs();
       exit(0);
     });
   }
@@ -904,79 +963,40 @@ void _installSignalHandlers(DaemonLifecycle lifecycle) {
 void _installQuitHandler({
   required TrayPort tray,
   required DaemonLifecycle lifecycle,
+  required Stream<void> panelQuitRequests,
+  required Future<void> Function() closeLogs,
+  required Logger logger,
 }) {
-  tray.quitRequests.listen(
-    (_) async {
-      if (lifecycle.isShuttingDown) {
-        // The same courtesy the repeat-signal branch extends — a user whose
-        // pick lands on a slow stop should learn the daemon is draining rather
-        // than ignoring them — but **not for as long**, and the difference is
-        // stated rather than implied.
-        //
-        // The line says a stop was already in progress, and deliberately does
-        // not say the user picked twice: `isShuttingDown` is true for *any*
-        // teardown, so this branch is also where a **first** pick lands during
-        // a `systemctl stop`, a logout, or `_abort`'s own shutdown. Claiming a
-        // repeat there would send whoever reads the journal looking for a
-        // second pick that never happened.
-        //
-        // This branch is reachable only while the
-        // tray is still alive: the teardown's `closing the tray` step disposes
-        // it — named rather than numbered, because
-        // [DaemonLifecycle.shutdown]'s doc groups the eleven `_step` calls into
-        // six numbered stages and the tray is the fifth of those, so an ordinal
-        // here would contradict the doc it points at — and
-        // `TrayManagerTray._onSelection` returns early once `_disposed` is set,
-        // so a pick after that point is silent and no line is written. The
-        // signal watchers stay responsive for the whole teardown, because
-        // nothing cancels them. Narrower on purpose: making the two identical
-        // would mean keeping a tray subscription alive past the step that
-        // closes the tray, which is a mechanism, not a log line.
-        //
-        // `shutdown()` latches either way, so a second pick that does reach
-        // here awaits the teardown already running instead of racing it.
-        _log(
-          () => stderr.writeln(
-            'the tray Quit entry was picked; a stop was already in progress, '
-            'so this awaits the teardown already running',
-          ),
-        );
-      } else {
-        // The common branch, and the one worth a line: a resident daemon found
-        // gone is first asked *what stopped it*, and without this the only
-        // trace is `DaemonLifecycle`'s own `shutting down` — identical to what
-        // a SIGTERM leaves behind. One line separates "the user chose to quit"
-        // from "the session manager stopped us".
-        _log(
-          () => stderr.writeln('the tray Quit entry was picked; shutting down'),
-        );
-      }
-      await lifecycle.shutdown();
-      exit(0);
-    },
-    // Only the runtime type reaches the line: the Logger port forbids an
-    // exception body on a channel that runs all day.
-    //
-    // Raw `stderr` rather than the [Logger] a caller could pass in — and that
-    // is a choice, not a constraint: `logger` is live at this handler's call
-    // site. The two exit triggers are deliberately kept identical down to what
-    // they leave behind, and [_installSignalHandlers] genuinely cannot reach a
-    // logger without being handed one it does not otherwise need. Splitting
-    // them would mean a tray Quit and a `SIGTERM` reading differently in the
-    // journal for no reason a reader could act on.
-    onError: (Object error) => _log(
-      () => stderr.writeln(
-        'the tray quit-request stream errored; the daemon stays up and a stop '
-        'signal still brings it down '
-        '(error_type: ${error.runtimeType})',
+  for (final (source, requests) in [
+    ('tray Quit', tray.quitRequests),
+    ('window Close', panelQuitRequests),
+  ]) {
+    requests.listen(
+      (_) async {
+        if (lifecycle.isShuttingDown) {
+          _log(
+            () => logger.info(
+              '$source requested quit; awaiting the teardown already running',
+            ),
+          );
+        } else {
+          _log(() => logger.info('$source requested quit; shutting down'));
+        }
+        await lifecycle.shutdown();
+        await closeLogs();
+        exit(0);
+      },
+      onError: (Object error) => _log(
+        () => logger.error(
+          'the $source quit-request stream errored; the daemon stays up',
+          context: {'error_type': error.runtimeType.toString()},
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
-/// Writes a startup-path note without letting a broken stderr take the daemon
-/// down — the same reasoning as the application ring's `_log`, at the one
-/// point that has no [Logger] of its own to reach for.
+/// A broken stderr must not interrupt startup or ordered shutdown.
 void _log(void Function() emit) {
   try {
     emit();

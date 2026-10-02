@@ -29,7 +29,10 @@ jobs:
       - run: dart analyze --fatal-infos
 
       # The X11 integration suite drives real key grabs on an isolated display.
-      - run: sudo apt-get update && sudo apt-get install -y xvfb xdotool
+      - run: sudo apt-get update && sudo apt-get install -y xvfb xdotool g++ libglib2.0-dev dbus
+
+      # Exercise the KDE activation-token method on a private session bus.
+      - run: tool/test_native_panel_activation.sh
 
       # The fake CLI rows otherwise skip and give a misleading green result.
       - run: tool/provision_sidecar.sh

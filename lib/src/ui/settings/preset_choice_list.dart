@@ -5,12 +5,12 @@ import '../../domain/correction/preset.dart';
 /// One option per configured preset, and CAP-8's caveat about when a switch
 /// takes effect.
 ///
-/// Selects a **preset**, never a provider (AD-5). A preset carries its
+/// Selects a complete preset for the chosen provider (AD-5). A preset carries its
 /// `providerId`, and the composition root is what resolves the
 /// `(provider, preset)` pair from it; a screen that picked a provider would be
 /// choosing half of an indivisible unit. The provider id and model are shown
 /// because that is what a user is actually choosing between — "try a faster
-/// model" is the whole point of CAP-8 — but they are shown, not selected.
+/// model" is the whole point of CAP-8.
 ///
 /// A committed choice serves the next correction. A run already streaming
 /// keeps the pair it captured when submitted.

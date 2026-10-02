@@ -11,7 +11,10 @@ final class ChatCompletionSseDecoder {
   static const int maxBodyBytes = 2 * 1024 * 1024;
   static const int maxFrameBytes = 64 * 1024;
 
-  Stream<String> decode(Stream<List<int>> bytes) {
+  Stream<String> decode(
+    Stream<List<int>> bytes, {
+    void Function(Map<String, Object?>)? onProviderError,
+  }) {
     late final StreamController<String> output;
     StreamSubscription<String>? lines;
     final frameData = <String>[];
@@ -46,6 +49,11 @@ final class ChatCompletionSseDecoder {
       try {
         final Object? decoded = jsonDecode(data);
         if (decoded is! Map<String, Object?>) throw const FormatException();
+        if (decoded['error'] != null) {
+          onProviderError?.call(decoded);
+          fail();
+          return;
+        }
         final choices = decoded['choices'];
         if (choices is! List<Object?>) throw const FormatException();
         if (choices.isEmpty) return; // Optional final usage frame.
@@ -55,7 +63,12 @@ final class ChatCompletionSseDecoder {
         final choice = choices.first as Map<String, Object?>;
         final finish = choice['finish_reason'];
         if (finish != null) {
-          if (finish != 'stop' || sawStop) throw const FormatException();
+          // OpenRouter repeats the stop reason in its final accounting frame.
+          final repeatsUsageStop =
+              sawStop && decoded['usage'] is Map<String, Object?>;
+          if (finish != 'stop' || (sawStop && !repeatsUsageStop)) {
+            throw const FormatException();
+          }
           sawStop = true;
         }
         final delta = choice['delta'];

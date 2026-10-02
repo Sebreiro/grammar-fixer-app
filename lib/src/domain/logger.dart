@@ -1,4 +1,4 @@
-/// Structured log lines to stderr, one line per call.
+/// Structured diagnostics to stderr and the config-adjacent log file.
 ///
 /// NEVER log `input_text` or suggestion bodies — the daemon reads the
 /// clipboard, so log payloads would leak whatever the user last copied.
@@ -12,6 +12,8 @@
 /// corrected text and every suggestion body. Log `error.runtimeType` and the
 /// values the caller authored itself; a resident daemon writes these lines
 /// to stderr all day.
+/// Provider response diagnostics must be sanitized in the adapter before
+/// reaching this port: redact credentials and echoed request/response text.
 abstract interface class Logger {
   void info(String message, {Map<String, Object?>? context});
 

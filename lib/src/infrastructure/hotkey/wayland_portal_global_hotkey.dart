@@ -113,6 +113,7 @@ final class WaylandPortalGlobalHotkey implements GlobalHotkey {
     required PortalAppIdRegime appIdRegime,
     required Duration requestTimeout,
     required Logger logger,
+    void Function(String? token)? onActivationToken,
   }) {
     if (client != null) {
       return WaylandPortalGlobalHotkey._(
@@ -120,6 +121,7 @@ final class WaylandPortalGlobalHotkey implements GlobalHotkey {
         appIdRegime,
         requestTimeout,
         logger,
+        onActivationToken,
       );
     }
     try {
@@ -128,6 +130,7 @@ final class WaylandPortalGlobalHotkey implements GlobalHotkey {
         appIdRegime,
         requestTimeout,
         logger,
+        onActivationToken,
       );
     } on Object catch (error) {
       // Logged here rather than at bind time, because this is the one failure
@@ -147,6 +150,7 @@ final class WaylandPortalGlobalHotkey implements GlobalHotkey {
         appIdRegime,
         requestTimeout,
         logger,
+        onActivationToken,
       );
     }
   }
@@ -156,6 +160,7 @@ final class WaylandPortalGlobalHotkey implements GlobalHotkey {
     this._appIdRegime,
     this._requestBudget,
     this._logger,
+    this._onActivationToken,
   );
 
   /// The reverse-DNS application id AD-11 fixes.
@@ -183,6 +188,7 @@ final class WaylandPortalGlobalHotkey implements GlobalHotkey {
   /// null-assertion, so the one branch that handles its absence is in [_bind],
   /// where it is an AD-12 value like any other.
   final DBusClient? _client;
+  final void Function(String? token)? _onActivationToken;
 
   /// Which mechanism owns this process's application id, and so whether step 1
   /// of the handshake runs at all — see [_registerApplicationIdOnce].
@@ -1239,6 +1245,9 @@ final class WaylandPortalGlobalHotkey implements GlobalHotkey {
     if (id is! DBusString || id.value != shortcutId) {
       return;
     }
+    // The portal's token carries the interaction in the other application.
+    // Preparing it synchronously preserves the hotkey's no-I/O decision path.
+    _onActivationToken?.call(_activationToken(signal.values));
     _activations.add(null);
   }
 
@@ -2091,3 +2100,20 @@ const String _registerCall = 'Registry.Register';
 /// about against its supervisor's stop grace, and the other two are hygiene on a
 /// bind that has already failed.
 const Duration _teardownBudget = Duration(seconds: 2);
+
+String? _activationToken(List<DBusValue> values) {
+  if (values.length != 4 || values[3] is! DBusDict) {
+    return null;
+  }
+  final options = values[3] as DBusDict;
+  if (options.signature != DBusSignature('a{sv}')) {
+    return null;
+  }
+  final token = options.children[const DBusString('activation_token')];
+  if (token case DBusVariant(
+    value: DBusString(value: final value),
+  ) when value.isNotEmpty) {
+    return value;
+  }
+  return null;
+}

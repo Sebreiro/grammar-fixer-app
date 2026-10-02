@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:hotkey_grammar_corrector/src/domain/config/close_behavior.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/app_config.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/config_write_conflict.dart';
 import 'package:hotkey_grammar_corrector/src/domain/config/provider_config.dart';
@@ -60,6 +61,110 @@ void main() {
     corrupt(json);
     writeRaw(jsonEncode(json));
   }
+
+  group('log limit (CAP-8)', () {
+    test(
+      'CAP-8: the log defaults to one MiB and persists its byte limit',
+      () async {
+        final store = newStore();
+        expect((await store.load()).config.logMaxBytes, 1048576);
+        final changed = store.current.copyWith(logMaxBytes: 5242880);
+        await store.write(changed);
+        final json =
+            jsonDecode(configFile.readAsStringSync()) as Map<String, Object?>;
+        expect(json['logMaxBytes'], 5242880);
+        expect((await newStore().load()).config, changed);
+      },
+    );
+
+    test(
+      'CAP-8: older configs without a log limit retain their settings',
+      () async {
+        final json = await validJson()
+          ..remove('logMaxBytes');
+        writeRaw(jsonEncode(json));
+        final result = await newStore().load();
+        expect(result.warning, isNull);
+        expect(result.config, _custom);
+      },
+    );
+
+    for (final invalid in <Object?>[
+      null,
+      true,
+      '1048576',
+      0,
+      -1,
+      1023,
+      1024.5,
+    ]) {
+      test('CAP-8: invalid log limit $invalid is rejected', () async {
+        await writeCorrupted((json) => json['logMaxBytes'] = invalid);
+        final result = await newStore().load();
+        expect(result.warning, contains('logMaxBytes'));
+        expect(result.config, defaults);
+      });
+    }
+
+    test(
+      'CAP-8: writing an invalid log limit leaves the saved config intact',
+      () async {
+        final store = newStore();
+        await store.load();
+        await expectLater(
+          store.write(store.current.copyWith(logMaxBytes: 0)),
+          throwsArgumentError,
+        );
+        expect((await newStore().load()).config, defaults);
+      },
+    );
+  });
+
+  group('close behavior (CAP-8)', () {
+    test('CAP-8: a fresh config closes to tray by default', () async {
+      final result = await newStore().load();
+      expect(result.config.closeBehavior, CloseBehavior.closeToTray);
+      final json =
+          jsonDecode(configFile.readAsStringSync()) as Map<String, Object?>;
+      expect(json['closeBehavior'], 'closeToTray');
+    });
+
+    test(
+      'CAP-8: an older config without close behavior keeps its settings',
+      () async {
+        final json = await validJson()
+          ..remove('closeBehavior');
+        writeRaw(jsonEncode(json));
+        final result = await newStore().load();
+        expect(result.warning, isNull);
+        expect(result.config, _custom);
+        expect(result.config.closeBehavior, CloseBehavior.closeToTray);
+      },
+    );
+
+    test('CAP-8: quit on close persists across a restart', () async {
+      final quit = _custom.copyWith(closeBehavior: CloseBehavior.quit);
+      await newStore().write(quit);
+      final json =
+          jsonDecode(configFile.readAsStringSync()) as Map<String, Object?>;
+      expect(json['closeBehavior'], 'quit');
+      final result = await newStore().load();
+      expect(result.warning, isNull);
+      expect(result.config, quit);
+    });
+
+    for (final invalid in <Object?>['unknown', null, true, 1]) {
+      test(
+        'CAP-8: invalid close behavior $invalid is rejected with a warning',
+        () async {
+          await writeCorrupted((json) => json['closeBehavior'] = invalid);
+          final result = await newStore().load();
+          expect(result.warning, contains('closeBehavior'));
+          expect(result.config, defaults);
+        },
+      );
+    }
+  });
 
   group('loading (AD-13)', () {
     test('CAP-8: a first run adopts the defaults and seeds the file so there '

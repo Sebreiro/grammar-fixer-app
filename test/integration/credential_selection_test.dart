@@ -84,6 +84,7 @@ void main() {
       const {'OPENAI_API_KEY': 'ignored-key'},
     );
     final provider = OpenAiCompatibleCorrectionProvider(
+      logger: FakeLogger(),
       baseUrl: 'http://127.0.0.1:${server.port}/v1',
       resolveApiKey: () async =>
           (await resolver.resolve(const ProviderConfig(settings: {}))).apiKey,

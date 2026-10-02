@@ -1,6 +1,7 @@
 import '../collection_equality.dart';
 import '../correction/preset.dart';
 import '../hotkey/hotkey_binding.dart';
+import 'close_behavior.dart';
 import 'provider_config.dart';
 
 /// The whole configuration as one immutable value.
@@ -26,6 +27,8 @@ final class AppConfig {
     required this.presets,
     required this.activePresetId,
     required this.hotkeyBinding,
+    this.closeBehavior = CloseBehavior.closeToTray,
+    this.logMaxBytes = defaultLogMaxBytes,
   });
 
   /// Described providers by provider id. Many may be described; exactly one
@@ -35,18 +38,27 @@ final class AppConfig {
   final List<Preset> presets;
   final String activePresetId;
   final HotkeyBinding hotkeyBinding;
+  final CloseBehavior closeBehavior;
+  final int logMaxBytes;
+
+  static const int defaultLogMaxBytes = 1024 * 1024;
+  static const int minimumLogMaxBytes = 1024;
 
   AppConfig copyWith({
     Map<String, ProviderConfig>? providers,
     List<Preset>? presets,
     String? activePresetId,
     HotkeyBinding? hotkeyBinding,
+    CloseBehavior? closeBehavior,
+    int? logMaxBytes,
   }) {
     return AppConfig(
       providers: providers ?? this.providers,
       presets: presets ?? this.presets,
       activePresetId: activePresetId ?? this.activePresetId,
       hotkeyBinding: hotkeyBinding ?? this.hotkeyBinding,
+      closeBehavior: closeBehavior ?? this.closeBehavior,
+      logMaxBytes: logMaxBytes ?? this.logMaxBytes,
     );
   }
 
@@ -63,6 +75,8 @@ final class AppConfig {
     return other is AppConfig &&
         activePresetId == other.activePresetId &&
         hotkeyBinding == other.hotkeyBinding &&
+        closeBehavior == other.closeBehavior &&
+        logMaxBytes == other.logMaxBytes &&
         listEquals(presets, other.presets) &&
         mapEquals(providers, other.providers);
   }
@@ -71,6 +85,8 @@ final class AppConfig {
   int get hashCode => Object.hash(
     activePresetId,
     hotkeyBinding,
+    closeBehavior,
+    logMaxBytes,
     listHash(presets),
     mapHash(providers),
   );

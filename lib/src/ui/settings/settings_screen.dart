@@ -12,9 +12,15 @@ import '../../domain/hotkey/global_hotkey.dart';
 import '../../domain/hotkey/hotkey_bind_outcome.dart';
 import '../../domain/hotkey/hotkey_binding.dart';
 import '../../domain/logger.dart';
+import 'api_key_field.dart';
+import 'close_behavior_field.dart';
+import 'log_size_field.dart';
+import 'compatible_provider_form.dart';
+import 'correction_prompt_field.dart';
 import 'hotkey_capture_field.dart';
 import 'hotkey_status_view.dart';
 import 'preset_choice_list.dart';
+import 'provider_choice_list.dart';
 import 'settings_failure_notice.dart';
 import 'settings_pending_notice.dart';
 
@@ -22,9 +28,8 @@ import 'settings_pending_notice.dart';
 /// (CAP-8, CAP-12).
 ///
 /// One surface, one owner. Every mutation is one of `SettingsController`'s
-/// methods, so AD-13's write-through to the config file holds by construction —
-/// no widget here opens the config file, and nothing on this screen holds a
-/// setting the config file does not. What this widget owns is only ephemeral UI:
+/// methods: configuration and API keys write through their injected stores.
+/// No widget opens either store. What this widget owns is only ephemeral UI:
 /// subscriptions, the last state it rendered, and the capture-field generation.
 /// Whether a mutation is in flight is deliberately **not** among them — see
 /// [_changeHotkey].
@@ -61,10 +66,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final StreamSubscription<void> _focusLosses;
 
   late SettingsState _state;
-  late final TextEditingController _baseUrlController;
-  late final TextEditingController _modelController;
-  bool _baseUrlChangedWhileEditing = false;
-  bool _modelChangedWhileEditing = false;
+  String? _setupProviderId;
   String _keySourceLabel = 'None configured';
   int _sourceGeneration = 0;
   int _captureGeneration = 0;
@@ -77,10 +79,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // The snapshot first, then the subscription: both in this one synchronous
     // step, so no state can be emitted between them and go unrendered.
     _state = _controller.state;
-    _baseUrlController = TextEditingController(text: _state.compatibleBaseUrl);
-    _modelController = TextEditingController(
-      text: _state.compatiblePreset?.model ?? '',
-    );
     unawaited(_refreshKeySource());
     _changes = _controller.changes.listen(
       _onStateChanged,
@@ -101,8 +99,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void dispose() {
     unawaited(_changes.cancel());
     unawaited(_focusLosses.cancel());
-    _baseUrlController.dispose();
-    _modelController.dispose();
     super.dispose();
   }
 
@@ -120,54 +116,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           state.hotkeyBindOutcome is HotkeyRetained) {
         _captureGeneration++;
       }
-      _syncBaseUrl(previous, state);
-      _syncModel(previous, state);
+      if (previous.config.activePresetId != state.config.activePresetId) {
+        _setupProviderId = null;
+      }
     });
     if (previous.config != state.config) unawaited(_refreshKeySource());
   }
-
-  void _syncBaseUrl(SettingsState previous, SettingsState current) {
-    final oldValue = previous.compatibleBaseUrl;
-    final newValue = current.compatibleBaseUrl;
-    if (oldValue != newValue && _baseUrlController.text == oldValue) {
-      _baseUrlController.text = newValue;
-    } else if (oldValue != newValue && _baseUrlController.text != newValue) {
-      _baseUrlChangedWhileEditing = true;
-    }
-    if (_baseUrlController.text == newValue) {
-      _baseUrlChangedWhileEditing = false;
-    }
-  }
-
-  void _syncModel(SettingsState previous, SettingsState current) {
-    final oldPreset = previous.compatiblePreset;
-    final newPreset = current.compatiblePreset;
-    final newValue = newPreset?.model ?? '';
-    if (oldPreset?.id != newPreset?.id) {
-      _modelController.text = newValue;
-      _modelChangedWhileEditing = false;
-      return;
-    }
-    if (oldPreset?.model != newPreset?.model &&
-        _modelController.text == (oldPreset?.model ?? '')) {
-      _modelController.text = newValue;
-    } else if (oldPreset?.model != newPreset?.model &&
-        _modelController.text != newValue) {
-      _modelChangedWhileEditing = true;
-    }
-    if (_modelController.text == newValue) {
-      _modelChangedWhileEditing = false;
-    }
-  }
-
-  void _onProviderDraftChanged() => setState(() {
-    if (_baseUrlController.text == _state.compatibleBaseUrl) {
-      _baseUrlChangedWhileEditing = false;
-    }
-    if (_modelController.text == (_state.compatiblePreset?.model ?? '')) {
-      _modelChangedWhileEditing = false;
-    }
-  });
 
   Future<void> _refreshKeySource() async {
     final generation = ++_sourceGeneration;
@@ -229,19 +183,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _changePreset(String presetId) =>
       unawaited(_controller.changeActivePreset(presetId));
 
-  void _saveProviderSettings() => unawaited(
-    _controller.changeProviderSettings(
-      baseUrl: _baseUrlController.text,
-      model: _modelController.text,
-    ),
-  );
+  void _changeProvider(String providerId) {
+    if (_state.presetForProvider(providerId) == null) {
+      setState(() => _setupProviderId = providerId);
+      return;
+    }
+    setState(() => _setupProviderId = null);
+    if (_state.activePreset?.providerId == providerId) return;
+    unawaited(_controller.changeActiveProvider(providerId));
+  }
 
-  bool get _providerSaveEnabled =>
-      !_state.mutationInFlight &&
-      _state.compatiblePreset != null &&
-      _baseUrlController.text.trim().isNotEmpty &&
-      _modelController.text.trim().isNotEmpty &&
-      ProviderConfig.baseUrlProblem(_baseUrlController.text) == null;
+  void _saveProviderSettings({required String baseUrl, required String model}) {
+    final save = _setupProviderId == ProviderConfig.compatibleProviderId
+        ? _controller.configureCompatibleProvider
+        : _controller.changeProviderSettings;
+    unawaited(save(baseUrl: baseUrl, model: model));
+  }
+
+  Future<bool> _saveApiKey(String apiKey) async {
+    final saved = await _controller.saveApiKey(apiKey);
+    if (saved && mounted) unawaited(_refreshKeySource());
+    return saved;
+  }
 
   /// Who owns the binding, as the *returned* outcome states it — null when no
   /// backend has answered, so the field claims neither regime (AD-10).
@@ -269,6 +232,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final config = _state.config;
     final pending = _state.mutationInFlight;
     final enabled = !pending;
+    final providerId = _setupProviderId ?? _state.activePreset?.providerId;
+    final providerIds = {
+      'claude-agent-sdk',
+      ProviderConfig.compatibleProviderId,
+      ...config.providers.keys,
+    };
     return Scaffold(
       appBar: AppBar(
         leading: BackButton(onPressed: widget.onBack),
@@ -336,6 +305,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        CloseBehaviorField(
+                          behavior: config.closeBehavior,
+                          enabled: enabled,
+                          onChanged: (behavior) => unawaited(
+                            _controller.changeCloseBehavior(behavior),
+                          ),
+                        ),
+                        const Divider(height: 24),
                         HotkeyStatusView(
                           outcome: _state.hotkeyBindOutcome,
                           backendDescription: _state.hotkeyBackendDescription,
@@ -355,64 +332,74 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           onApply: _changeHotkey,
                         ),
                         const Divider(height: 24),
-                        PresetChoiceList(
-                          presets: config.presets,
-                          activePresetId: config.activePresetId,
+                        ProviderChoiceList(
+                          providerIds: providerIds,
+                          selectedProviderId: providerId,
                           enabled: enabled,
-                          onSelect: _changePreset,
+                          onSelect: _changeProvider,
+                        ),
+                        const SizedBox(height: 8),
+                        if (config.presets.any(
+                          (preset) => preset.providerId == providerId,
+                        ))
+                          PresetChoiceList(
+                            presets: config.presets
+                                .where(
+                                  (preset) => preset.providerId == providerId,
+                                )
+                                .toList(),
+                            activePresetId: config.activePresetId,
+                            enabled: enabled,
+                            onSelect: _changePreset,
+                          ),
+                        if (providerId == 'claude-agent-sdk')
+                          const Text(
+                            'Uses your Claude Code sign-in on this computer.',
+                          ),
+                        if (providerId ==
+                            ProviderConfig.compatibleProviderId) ...[
+                          const Divider(height: 24),
+                          CompatibleProviderForm(
+                            baseUrl: _state.compatibleBaseUrl,
+                            preset: _state.presetForProvider(
+                              ProviderConfig.compatibleProviderId,
+                            ),
+                            enabled: enabled,
+                            onSave: _saveProviderSettings,
+                          ),
+                          const Divider(height: 24),
+                          ApiKeyField(enabled: enabled, onSave: _saveApiKey),
+                          const SizedBox(height: 8),
+                          Text('API key source: $_keySourceLabel'),
+                          if (_keySourceLabel == 'Config file')
+                            const Text(
+                              'This API key is stored as plaintext in config.json. '
+                              'Move it to your system keyring or environment.',
+                            ),
+                        ],
+                        if (_state.activePreset case final preset?
+                            when preset.providerId == providerId) ...[
+                          const Divider(height: 24),
+                          CorrectionPromptField(
+                            key: ValueKey(preset.id),
+                            prompt: preset.systemPrompt,
+                            enabled: enabled,
+                            onSave: (prompt) => unawaited(
+                              _controller.changeCorrectionPrompt(
+                                preset: preset,
+                                systemPrompt: prompt,
+                              ),
+                            ),
+                          ),
+                        ],
+                        const Divider(height: 24),
+                        LogSizeField(
+                          maxBytes: config.logMaxBytes,
+                          enabled: enabled,
+                          onChanged: (bytes) =>
+                              unawaited(_controller.changeLogMaxBytes(bytes)),
                         ),
                         const Divider(height: 24),
-                        Text(
-                          'OpenAI-compatible provider',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _baseUrlController,
-                          onChanged: (_) => _onProviderDraftChanged(),
-                          decoration: InputDecoration(
-                            labelText: 'Base URL',
-                            errorText: _baseUrlController.text.trim().isEmpty
-                                ? 'Required'
-                                : ProviderConfig.baseUrlProblem(
-                                    _baseUrlController.text,
-                                  ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _modelController,
-                          onChanged: (_) => _onProviderDraftChanged(),
-                          decoration: InputDecoration(
-                            labelText: 'Model',
-                            errorText: _modelController.text.trim().isEmpty
-                                ? 'Required'
-                                : null,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        if (_baseUrlChangedWhileEditing ||
-                            _modelChangedWhileEditing)
-                          const Text(
-                            'Provider settings changed while you were editing. '
-                            'Saving will replace those changes with your draft.',
-                          ),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: FilledButton(
-                            onPressed: _providerSaveEnabled
-                                ? _saveProviderSettings
-                                : null,
-                            child: const Text('Save provider settings'),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text('API key source: $_keySourceLabel'),
-                        if (_keySourceLabel == 'Config file')
-                          const Text(
-                            'This API key is stored as plaintext in config.json. '
-                            'Move it to your system keyring or environment.',
-                          ),
                       ],
                     ),
                   ),
