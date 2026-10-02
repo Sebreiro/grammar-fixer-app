@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 milestone: v1.0
 status: Awaiting next milestone
 stopped_at: Phase 02 complete — all phases complete
-last_updated: "2026-10-02T15:33:29.882Z"
+last_updated: "2026-10-02T16:24:00.583Z"
 last_activity: 2026-10-02
-last_activity_desc: "Completed quick task 261002-bb8: support Ctrl+Shift+tilde and standard punctuation hotkeys; rebuilt verified local AppImage"
-state_head: d27914d20b835d71cd005c67e663bf2eee66ace4
+last_activity_desc: "Completed quick task 261002-cdz: Keep correction panel above windows on KDE Wayland; preserve taskbar and rebuild verified local AppImage"
+state_head: 36d91b9b0afaf88b31db4b3d8dca5bb75effb0d9
 progress:
   total_phases: 2
   completed_phases: 2
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-26 after v1.0)
 Phase: Milestone v1.0 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-02 - Completed quick task 261002-bb8: support Ctrl+Shift+tilde and standard punctuation hotkeys; rebuilt verified local AppImage
+Last activity: 2026-10-02 - Completed quick task 261002-cdz: Keep correction panel above windows on KDE Wayland; preserve taskbar and rebuild verified local AppImage
 
 ## Performance Metrics
 
@@ -249,6 +249,8 @@ None yet.
 | 261002-7wk | Enforce correction response format and suppress OpenRouter optional thinking | 2026-10-02 | 07f14ed | Needs Review | [261002-7wk-fix-malformed-response-when-pressing-cor](./quick/261002-7wk-fix-malformed-response-when-pressing-cor/) |
 | 261002-a39 | Deliver verified OpenRouter Ministral AppImage, repair native asset loading, and remove old AppImages | 2026-10-02 | 0ec708f | Verified | [261002-a39-fix-openrouter-ministral-stream-failure-](./quick/261002-a39-fix-openrouter-ministral-stream-failure-/) |
 | 261002-bb8 | Support Ctrl+Shift+tilde and all standard punctuation hotkeys | 2026-10-02 | d27914d | Verified | [261002-bb8-fix-ctrl-shift-tilde-hotkey-capture-and-](./quick/261002-bb8-fix-ctrl-shift-tilde-hotkey-capture-and-/) |
+| 261002-cgz | First suggestion preserves wording with grammar and native phrasing fixes; second Casual; third Short | 2026-10-02 | 80efc0c | Needs Review | [261002-cgz-make-the-first-correction-preserve-wordi](./quick/261002-cgz-make-the-first-correction-preserve-wordi/) |
+| 261002-cdz | Keep correction panel above windows on KDE Wayland; preserve taskbar and rebuild verified local AppImage | 2026-10-02 | 36d91b9 | Needs Review | [261002-cdz-keep-the-correction-panel-above-other-wi](./quick/261002-cdz-keep-the-correction-panel-above-other-wi/) |
 
 ### Roadmap Evolution
 

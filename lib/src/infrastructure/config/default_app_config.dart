@@ -5,8 +5,8 @@ import '../../domain/config/provider_config.dart';
 import '../../domain/correction/preset.dart';
 import '../../domain/hotkey/hotkey_binding.dart';
 import '../correction/claude_agent_sdk/claude_agent_sdk_correction_provider.dart';
-import '../correction/claude_agent_sdk/register_tagged_stream_parser.dart';
 import '../correction/claude_agent_sdk/sidecar_host_paths.dart';
+import '../correction/shared/register_tagged_prompt.dart';
 
 /// The configuration a fresh install starts from: one described provider,
 /// one preset, one hotkey.
@@ -20,22 +20,11 @@ final class DefaultAppConfig {
   /// The shipped preset's id (kebab-case, per the Consistency Conventions).
   static const String shippedPresetId = 'default-formal-casual-shorter';
 
-  /// The shipped preset's system prompt. It fixes AD-16's wire format and
-  /// nothing else: output-quality wording is a SPEC non-goal.
-  ///
-  /// The closing sentinel is interpolated from
-  /// [RegisterTaggedStreamParser.endSentinel] rather than spelled out, so
-  /// the prompt and the parser that enforces it cannot drift apart.
+  /// Shares the adapters' suggestion instructions so fresh defaults and
+  /// existing presets cannot ask for different first-variant behavior.
   static const String shippedSystemPrompt =
-      'You correct English grammar. Reply with exactly four lines and '
-      'nothing else:\n'
-      'FORMAL: <the corrected text in a formal register>\n'
-      'CASUAL: <the corrected text in a casual register>\n'
-      'SHORTER: <the shortest correct rewrite>\n'
-      '${RegisterTaggedStreamParser.endSentinel}\n'
-      'Each tag appears exactly once, in that order, and the final line is '
-      'exactly ${RegisterTaggedStreamParser.endSentinel}.\n'
-      'Do not add other text, blank lines, quotes, or markdown.';
+      'You correct English grammar and phrasing while preserving the intended '
+      'meaning.\n\n${RegisterTaggedPrompt.responseFormat}';
 
   /// The default model the shipped preset is bound to.
   static const String shippedModel = 'claude-sonnet-5';

@@ -51,7 +51,17 @@ void main() {
       final window = WindowManagerPanelWindow(activationPresenter: presenter);
       await window.dispose();
       await window.focus(activation: const PanelActivation.portal('abandoned'));
-      expect(calls, isEmpty);
+      expect(calls.map((call) => call.method), ['dispose']);
+    },
+  );
+
+  test(
+    'CAP-1: warm window teardown releases the native stacking resources once',
+    () async {
+      final window = WindowManagerPanelWindow(activationPresenter: presenter);
+      await window.dispose();
+      await window.dispose();
+      expect(calls.map((call) => call.method), ['dispose']);
     },
   );
 

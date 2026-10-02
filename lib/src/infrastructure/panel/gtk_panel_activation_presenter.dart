@@ -15,6 +15,9 @@ final class GtkPanelActivationPresenter implements PanelActivationPresenter {
   Future<void> initialize() => _channel.invokeMethod<void>('initialize');
 
   @override
+  Future<void> dispose() => _channel.invokeMethod<void>('dispose');
+
+  @override
   Future<void> present(PanelActivation? activation) {
     return _channel.invokeMethod<void>('present', <String, Object?>{
       'token': activation?.token,

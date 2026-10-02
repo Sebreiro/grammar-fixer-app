@@ -76,6 +76,15 @@ use the tray default; external edits take effect without restarting.
 
 ### Correction prompts
 
+Each correction returns three suggestions in this order:
+
+1. **Corrected** — keep your wording and tone, fixing only grammar and unnatural
+   phrasing. Already-correct, natural text stays unchanged.
+2. **Casual** — use relaxed, everyday English with the same meaning.
+3. **Short** — be concise while keeping the meaning and key details.
+
+Press **1**, **2**, or **3** to select the corresponding suggestion.
+
 On first run the app creates a populated config at
 `${XDG_CONFIG_HOME:-~/.config}/hotkey-grammar-corrector/config.json` and writes
 its default correction prompt to `prompt-default-formal-casual-shorter.txt`
@@ -100,7 +109,10 @@ choose **Save prompt**. Settings saves to the same text file. Both surfaces stay
 in sync; saved edits apply to the next correction without restarting. The prompt
 stays paired with its preset's model and provider. Both shipped providers append
 the required `FORMAL:`, `CASUAL:`, `SHORTER:` and final `END` response format to
-each request, so your prompt can focus on grammar instructions. This does not
+each request, together with the required suggestion behaviors above. These
+behaviors take priority over conflicting register instructions in older prompts.
+The tags and preset IDs retain their existing names for history and config
+compatibility; `FORMAL:` now identifies the **Corrected** slot. This does not
 rewrite your saved prompt file. A model response that ignores the format or ends
 early still appears as an inline error with **Retry**.
 

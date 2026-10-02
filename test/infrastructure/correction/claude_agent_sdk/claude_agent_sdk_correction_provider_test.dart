@@ -83,6 +83,13 @@ echo '{"type":"done"}'
         expect(prompt, contains(tag));
       }
       expect(prompt, contains('Begin your response with FORMAL:'));
+      expect(
+        prompt,
+        contains('preserve the original wording, tone, and meaning'),
+      );
+      expect(prompt, contains('Do not make it more formal'));
+      expect(prompt, contains('For CASUAL, use relaxed, everyday English'));
+      expect(prompt, contains('For SHORTER, be brief'));
     });
 
     test('CAP-5: tagged text plus done streams deltas then '

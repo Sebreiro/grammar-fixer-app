@@ -40,7 +40,7 @@ import 'package:test/test.dart';
 /// Both scans assert a **subset** of what is permitted, never set equality:
 /// equality also *requires* every permitted call, so dropping one in a
 /// legitimate refactor would turn a green test red for no reason. A subset
-/// check can only forbid, though, six of `main.dart`'s calls carry
+/// check can only forbid, though, seven of `main.dart`'s calls carry
 /// behaviour rather than merely being allowed — `setSkipTaskbar(false)` allows
 /// the visible panel into the taskbar, and `setPreventClose` is what
 /// lets application policy answer Close without destroying the toplevel —
@@ -187,7 +187,7 @@ void main() {
 
     test('CAP-1: the composition root still prepares the hidden window and '
         'its geometry before any summon', () {
-      // Initialization and six properties are required. The geometry calls
+      // Initialization and seven properties are required. The geometry calls
       // give the already-warm window a size, minimum and best-effort position.
       //
       // The subset check above bans; it cannot require. That is deliberate —
@@ -210,11 +210,17 @@ void main() {
         reason: 'the visible warm panel participates in the taskbar/dock',
       );
       expect(
+        _stripComments(File('lib/main.dart').readAsStringSync()),
+        contains('windowManager.setAlwaysOnTop(true)'),
+        reason: 'the visible panel stays above ordinary windows on X11',
+      );
+      expect(
         reached,
         containsAll(<String>[
           'ensureInitialized',
           'setTitle',
           'setSkipTaskbar',
+          'setAlwaysOnTop',
           'setPreventClose',
           'setMinimumSize',
           'setSize',
@@ -365,7 +371,6 @@ const List<String> _mappingCalls = [
   'windowManager.show(',
   'windowManager.restore(',
   'windowManager.focus(',
-  'windowManager.setAlwaysOnTop(',
   'waitUntilReadyToShow(',
 ];
 
@@ -400,6 +405,8 @@ const Set<String> _permittedWindowManagerCalls = {
   'ensureInitialized',
   'setTitle',
   'setSkipTaskbar',
+  // GTK keep-above prepares state without mapping an unmapped window.
+  'setAlwaysOnTop',
   // setMinimumSize updates GTK geometry hints; setSize calls gtk_window_resize;
   // setPosition calls gtk_window_move. None calls gtk_widget_show or present.
   // The requested position is advisory for an ordinary Wayland toplevel.

@@ -50,7 +50,7 @@ void main() {
     expect(record.suggestions.first.text, 'Corrected formal text');
     expect(find.text('I have gone'), findsNothing);
 
-    final copyButton = find.byTooltip('Copy the formal suggestion');
+    final copyButton = find.byTooltip('Copy the Corrected suggestion');
     await tester.ensureVisible(copyButton);
     await tester.tap(copyButton);
     await tester.pump();

@@ -27,6 +27,13 @@ void main() {
     expect(system['role'], 'system');
     expect(prompt, startsWith('${_preset.systemPrompt}\n\n'));
     expect(prompt, contains('Begin your response with FORMAL:'));
+    expect(
+      prompt,
+      contains('preserve the original wording, tone, and meaning'),
+    );
+    expect(prompt, contains('Do not make it more formal'));
+    expect(prompt, contains('For CASUAL, use relaxed, everyday English'));
+    expect(prompt, contains('For SHORTER, be brief'));
     expect(messages.last, {'role': 'user', 'content': 'i has a draft'});
   });
 

@@ -501,7 +501,7 @@ void main() {
     final listRect = tester.getRect(find.byType(SuggestionList));
     final label = find.descendant(
       of: cardOf(last),
-      matching: find.text(last.name),
+      matching: find.text(last.label),
     );
 
     expect(
@@ -537,7 +537,7 @@ void main() {
     for (final register in SuggestionRegister.values) {
       expect(
         tester.getSemantics(copyButtonOf(register)).tooltip,
-        equals('Copy the ${register.name} suggestion'),
+        equals('Copy the ${register.label} suggestion'),
         reason: 'CAP-11 is "each suggestion has its own button"',
       );
     }

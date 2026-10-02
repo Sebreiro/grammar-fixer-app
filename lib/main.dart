@@ -334,7 +334,7 @@ Future<void> _finishStartup({
     await activationPresenter.initialize().timeout(_unresponsiveCallBudget);
   } on Object catch (error) {
     logger.warning(
-      'desktop activation tokens could not be initialized',
+      'desktop panel activation could not be initialized',
       context: {'error_type': error.runtimeType.toString()},
     );
   }
@@ -731,6 +731,9 @@ Future<void> _createHiddenWindow() async {
   await windowManager.setTitle('Hotkey Grammar Corrector');
   // Prepare taskbar eligibility once so summoning adds no window setup.
   await windowManager.setSkipTaskbar(false);
+  // X11 honours GTK's keep-above hint. KDE Wayland is prepared separately by
+  // the native presenter because GTK ignores this hint on Wayland.
+  await windowManager.setAlwaysOnTop(true);
   // Geometry is prepared on the hidden toplevel, before any hotkey can summon
   // it. These calls configure GTK's size hints and bounds; none presents it.
   // The display snapshot is best effort: Wayland owns ordinary toplevel

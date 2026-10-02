@@ -118,6 +118,10 @@ void _expectRequest(Map<String, Object?> request, String prompt) {
     expect(content, contains(tag));
   }
   expect(content, contains('Begin your response with FORMAL:'));
+  expect(content, contains('preserve the original wording, tone, and meaning'));
+  expect(content, contains('Do not make it more formal'));
+  expect(content, contains('For CASUAL, use relaxed, everyday English'));
+  expect(content, contains('For SHORTER, be brief'));
 }
 
 Future<void> _reply(

@@ -8,7 +8,7 @@ import 'register_key_slot.dart';
 ///
 /// Both the key hint and the label are *derived* from the enum — the hint from
 /// `SuggestionRegister.values.indexOf(register) + 1` (AD-6) and the label from
-/// `register.name` — so reordering or renaming a register cannot leave this
+/// `register.label` — so reordering or relabeling a register cannot leave this
 /// card claiming the wrong key or the wrong name.
 ///
 /// The card is also where "is this variant actionable" is decided, once, from
@@ -80,7 +80,7 @@ class SuggestionCard extends StatelessWidget {
     return Semantics(
       container: true,
       selected: selected,
-      label: '${register.name} suggestion',
+      label: '${register.label} suggestion',
       child: Card(
         color: selected ? theme.colorScheme.primaryContainer : null,
         child: InkWell(
@@ -113,7 +113,7 @@ class SuggestionCard extends StatelessWidget {
                     // copy button out of reach.
                     Flexible(
                       child: Text(
-                        register.name,
+                        register.label,
                         style: theme.textTheme.labelMedium,
                         overflow: TextOverflow.ellipsis,
                         softWrap: false,
@@ -125,7 +125,7 @@ class SuggestionCard extends StatelessWidget {
                         child: Icon(
                           Icons.check,
                           size: 18,
-                          semanticLabel: '${register.name} selected',
+                          semanticLabel: '${register.label} selected',
                         ),
                       ),
                     const Spacer(),
@@ -134,7 +134,7 @@ class SuggestionCard extends StatelessWidget {
                       // Named, because three visually identical buttons are
                       // indistinguishable to a screen reader — and CAP-11 is
                       // "each suggestion has its own button".
-                      tooltip: 'Copy the ${register.name} suggestion',
+                      tooltip: 'Copy the ${register.label} suggestion',
                       icon: const Icon(Icons.copy, size: 18),
                       visualDensity: VisualDensity.compact,
                     ),
@@ -145,7 +145,7 @@ class SuggestionCard extends StatelessWidget {
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Semantics(
                       liveRegion: true,
-                      label: '${register.name} suggestion $copyStatusText',
+                      label: '${register.label} suggestion $copyStatusText',
                       child: Row(
                         children: [
                           if (copyPending)

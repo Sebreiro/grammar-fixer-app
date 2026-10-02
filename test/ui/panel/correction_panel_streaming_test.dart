@@ -97,8 +97,8 @@ void main() {
     }
   });
 
-  testWidgets('AD-6: each row\'s key hint is its own indexOf + 1, and its '
-      'label is the register\'s name', (tester) async {
+  testWidgets('CAP-4 AD-6: each row\'s key hint is its own indexOf + 1, and its '
+      'label is Corrected, Casual, or Short', (tester) async {
     await startCorrection(tester);
     await harness.completeRun(tester);
 
@@ -130,10 +130,10 @@ void main() {
       expect(
         find.descendant(
           of: cardOf(register),
-          matching: find.text(register.name),
+          matching: find.text(['Corrected', 'Casual', 'Short'][index]),
         ),
         findsOneWidget,
-        reason: 'the label derives from .name and is never written out',
+        reason: 'the label describes the requested behavior for this key slot',
       );
     }
   });

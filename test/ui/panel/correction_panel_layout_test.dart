@@ -80,7 +80,7 @@ void main() {
     // The first variant's label, its key hint and the start of its text are all
     // on screen beside the editor — not merely present in the tree.
     for (final inside in [
-      find.descendant(of: firstCard, matching: find.text(first.name)),
+      find.descendant(of: firstCard, matching: find.text(first.label)),
       find.descendant(of: firstCard, matching: find.text('1')),
     ]) {
       final rect = tester.getRect(inside);
@@ -250,7 +250,7 @@ void main() {
       (widget) => widget is SuggestionCard && widget.register == first,
     );
     for (final inside in [
-      find.descendant(of: firstCard, matching: find.text(first.name)),
+      find.descendant(of: firstCard, matching: find.text(first.label)),
       find.descendant(of: firstCard, matching: find.text('1')),
     ]) {
       final rect = tester.getRect(inside);
@@ -393,7 +393,7 @@ void main() {
         of: find.byWidgetPredicate(
           (widget) => widget is SuggestionCard && widget.register == first,
         ),
-        matching: find.text(first.name),
+        matching: find.text(first.label),
       ),
     );
     expect(labelRect.height, greaterThan(0));

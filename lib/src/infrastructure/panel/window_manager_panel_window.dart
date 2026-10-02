@@ -115,5 +115,6 @@ final class WindowManagerPanelWindow
     _disposed = true;
     windowManager.removeListener(this);
     await _events.close();
+    await _activationPresenter?.dispose();
   }
 }

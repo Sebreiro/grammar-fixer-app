@@ -9,6 +9,7 @@ import 'package:hotkey_grammar_corrector/src/infrastructure/correction/claude_ag
 import 'package:hotkey_grammar_corrector/src/infrastructure/correction/claude_agent_sdk/register_tagged_stream_parser.dart';
 import 'package:hotkey_grammar_corrector/src/infrastructure/correction/claude_agent_sdk/sidecar_host_paths.dart';
 import 'package:hotkey_grammar_corrector/src/infrastructure/correction/provider_registry.dart';
+import 'package:hotkey_grammar_corrector/src/infrastructure/correction/shared/register_tagged_prompt.dart';
 import 'package:test/test.dart';
 
 import '../../fakes/fake_logger.dart';
@@ -19,6 +20,14 @@ import '../../fakes/fake_logger.dart';
 /// would turn every real correction into a malformedResponse.
 void main() {
   group('the shipped prompt (AD-16, CAP-9)', () {
+    test('CAP-4 CAP-9: fresh installs use the same variant requirements '
+        'as existing configured presets', () {
+      expect(
+        DefaultAppConfig.shippedSystemPrompt,
+        endsWith(RegisterTaggedPrompt.responseFormat),
+      );
+    });
+
     test('AD-16: the prompt names all three register tags in enum '
         'declaration order', () {
       const prompt = DefaultAppConfig.shippedSystemPrompt;
@@ -52,7 +61,12 @@ void main() {
         greaterThan(prompt.indexOf('SHORTER:')),
         reason: 'the sentinel closes the response, it does not open it',
       );
-      expect(prompt, contains('the final line is exactly $sentinel'));
+      expect(
+        prompt,
+        contains(
+          RegExp('the final line is exactly $sentinel', caseSensitive: false),
+        ),
+      );
     });
 
     test('CAP-5: a response obeying the shipped prompt completes, and the '
