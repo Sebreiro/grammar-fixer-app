@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 milestone: v1.0
 status: Awaiting next milestone
 stopped_at: Phase 02 complete — all phases complete
-last_updated: "2026-10-02T14:50:58.413Z"
+last_updated: "2026-10-02T15:33:29.882Z"
 last_activity: 2026-10-02
-last_activity_desc: "Completed quick task 261002-a39 follow-up: reproduced old AppImage failure, rebuilt verified AppImage in build/releases, fixed bundled SQLite loading, and removed old generated AppImages"
-state_head: 0ec708fe4f1256d551d87f8acc3b35357c67ff2b
+last_activity_desc: "Completed quick task 261002-bb8: support Ctrl+Shift+tilde and standard punctuation hotkeys; rebuilt verified local AppImage"
+state_head: d27914d20b835d71cd005c67e663bf2eee66ace4
 progress:
   total_phases: 2
   completed_phases: 2
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-26 after v1.0)
 Phase: Milestone v1.0 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-02 - Completed quick task 261002-a39 follow-up: reproduced old AppImage failure, rebuilt verified AppImage in build/releases, fixed bundled SQLite loading, and removed old generated AppImages
+Last activity: 2026-10-02 - Completed quick task 261002-bb8: support Ctrl+Shift+tilde and standard punctuation hotkeys; rebuilt verified local AppImage
 
 ## Performance Metrics
 
@@ -248,6 +248,7 @@ None yet.
 | 261002-77g | Editable correction prompt text files with default seeding and synchronized Settings | 2026-10-02 | 0076bf6 | Verified | [261002-77g-make-correction-grammar-prompts-visible-](./quick/261002-77g-make-correction-grammar-prompts-visible-/) |
 | 261002-7wk | Enforce correction response format and suppress OpenRouter optional thinking | 2026-10-02 | 07f14ed | Needs Review | [261002-7wk-fix-malformed-response-when-pressing-cor](./quick/261002-7wk-fix-malformed-response-when-pressing-cor/) |
 | 261002-a39 | Deliver verified OpenRouter Ministral AppImage, repair native asset loading, and remove old AppImages | 2026-10-02 | 0ec708f | Verified | [261002-a39-fix-openrouter-ministral-stream-failure-](./quick/261002-a39-fix-openrouter-ministral-stream-failure-/) |
+| 261002-bb8 | Support Ctrl+Shift+tilde and all standard punctuation hotkeys | 2026-10-02 | d27914d | Verified | [261002-bb8-fix-ctrl-shift-tilde-hotkey-capture-and-](./quick/261002-bb8-fix-ctrl-shift-tilde-hotkey-capture-and-/) |
 
 ### Roadmap Evolution
 

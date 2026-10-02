@@ -156,7 +156,8 @@ final class HotkeyCaptureValidator {
         refusal: HotkeyCaptureRefusal.keyNotRegistrable,
         reason:
             'That key is not one this app can register as a shortcut. Letters, '
-            'digits, F1 to F12, and the navigation keys all work.',
+            'digits, standard punctuation, F1 to F12, and the navigation keys '
+            'all work.',
       );
     }
     return HotkeyCaptureAccepted(

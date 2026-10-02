@@ -12,7 +12,7 @@ import '../../domain/hotkey/hotkey_binding.dart';
 /// and the key name is a **keysym name**, not a label.
 ///
 /// That last point is the whole reason this type exists rather than the key
-/// label being passed through. Four of the fifteen named labels this app offers
+/// label being passed through. Several of the named labels this app offers
 /// are not keysym names at all. Measured here by calling
 /// `xkb_keysym_from_name` against the installed xkbcommon 1.6.0:
 /// `Space`, `Enter`, `Backspace` and `ArrowUp` all answer `NoSymbol`, while
@@ -119,11 +119,11 @@ final class XdgShortcutTrigger {
     HotkeyModifier.meta,
   ];
 
-  /// The fifteen labels that are not a letter, a digit or a function key,
+  /// The labels that are not a letter, a digit or a function key,
   /// mapped to the keysym name each one actually is.
   ///
   /// Every value was measured with `xkb_keysym_from_name` against xkbcommon
-  /// 1.6.0 in this container, and four of the fifteen are why the map exists:
+  /// 1.6.0 in this container. Examples of why the map exists:
   ///
   /// * `Space` → `space`. The capitalised form is `NoSymbol`; the keysym is the
   ///   ASCII space, whose canonical name is lower case.
@@ -155,6 +155,18 @@ final class XdgShortcutTrigger {
     'ArrowDown': 'Down',
     'ArrowLeft': 'Left',
     'ArrowRight': 'Right',
+    'Minus': 'minus',
+    'Equal': 'equal',
+    'BracketLeft': 'bracketleft',
+    'BracketRight': 'bracketright',
+    'Backslash': 'backslash',
+    'Semicolon': 'semicolon',
+    'Quote': 'apostrophe',
+    // Shift stays in the modifier set; a shifted character is not a new key.
+    'Backquote': 'grave',
+    'Comma': 'comma',
+    'Period': 'period',
+    'Slash': 'slash',
   };
 
   static final Map<String, String> _namedKeysymNamesByUpperCase =

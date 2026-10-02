@@ -69,6 +69,17 @@ final class HotkeyKeyCatalogue {
     'ArrowDown': 0x00070051,
     'ArrowLeft': 0x00070050,
     'ArrowRight': 0x0007004f,
+    'Minus': 0x0007002d,
+    'Equal': 0x0007002e,
+    'BracketLeft': 0x0007002f,
+    'BracketRight': 0x00070030,
+    'Backslash': 0x00070031,
+    'Semicolon': 0x00070033,
+    'Quote': 0x00070034,
+    'Backquote': 0x00070035,
+    'Comma': 0x00070036,
+    'Period': 0x00070037,
+    'Slash': 0x00070038,
   };
 
   static final Map<String, int> _namedKeysByUpperCase = <String, int>{

@@ -84,6 +84,50 @@ void main() {
   });
 
   group('keys (AD-9)', () {
+    test('CAP-12: punctuation shortcuts use base keysym names and preserve '
+        'their modifiers', () {
+      const keysyms = {
+        'Minus': 'minus',
+        'Equal': 'equal',
+        'BracketLeft': 'bracketleft',
+        'BracketRight': 'bracketright',
+        'Backslash': 'backslash',
+        'Semicolon': 'semicolon',
+        'Quote': 'apostrophe',
+        'Backquote': 'grave',
+        'Comma': 'comma',
+        'Period': 'period',
+        'Slash': 'slash',
+      };
+      for (final MapEntry(:key, :value) in keysyms.entries) {
+        expect(XdgShortcutTrigger.keysymNameFor(key.toLowerCase()), value);
+        expect(
+          XdgShortcutTrigger.forBinding(
+            HotkeyBinding(
+              modifiers: {HotkeyModifier.control, HotkeyModifier.shift},
+              key: key,
+            ),
+          ),
+          'CTRL+SHIFT+$value',
+        );
+      }
+    });
+
+    test('CAP-12: Ctrl+Shift+tilde keeps Shift and uses the base grave '
+        'keysym for both Linux backends', () {
+      expect(XdgShortcutTrigger.keysymNameFor('Backquote'), 'grave');
+      expect(XdgShortcutTrigger.keysymNameFor(' backquote '), 'grave');
+      expect(
+        XdgShortcutTrigger.forBinding(
+          HotkeyBinding(
+            modifiers: {HotkeyModifier.control, HotkeyModifier.shift},
+            key: 'Backquote',
+          ),
+        ),
+        'CTRL+SHIFT+grave',
+      );
+    });
+
     test(
       'AD-9: letters fold to lower case, so Ctrl+Shift+G is CTRL+SHIFT+g',
       () {
@@ -334,7 +378,7 @@ void main() {
             'a collision would let two configured keys request the same '
             'trigger, and the compositor would have no way to tell them apart',
       );
-      expect(names, hasLength(63));
+      expect(names, hasLength(74));
     });
   });
 }

@@ -440,9 +440,9 @@ void main() {
     expect(_filesReferencing('/.flatpak-info'), isNotEmpty);
     expect(
       _triggerVocabulary,
-      hasLength(68),
+      hasLength(79),
       reason:
-          '4 modifier keywords + 63 composed triggers + preferred_trigger; a '
+          '4 modifier keywords + 74 composed triggers + preferred_trigger; a '
           'derivation that quietly produced an empty set would make the row '
           'above pass by scanning for nothing',
     );

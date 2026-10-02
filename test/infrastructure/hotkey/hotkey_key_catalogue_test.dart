@@ -73,6 +73,40 @@ void main() {
       expect(HotkeyKeyCatalogue.usbHidUsageFor('ArrowRight'), 0x0007004f);
     });
 
+    test('CAP-12: the backtick and tilde key is available for capture and '
+        'registration', () {
+      expect(HotkeyKeyCatalogue.usbHidUsageFor('Backquote'), 0x00070035);
+      expect(HotkeyKeyCatalogue.usbHidUsageFor(' backquote '), 0x00070035);
+      expect(HotkeyKeyCatalogue.labelForUsage(0x00070035), 'Backquote');
+      expect(
+        HotkeyKeyCatalogue.registrableKeys().forUsage(0x00070035)?.label,
+        'Backquote',
+      );
+    });
+
+    test('CAP-12: standard punctuation keys have their own physical usages '
+        'in the captured vocabulary', () {
+      const usages = {
+        'Minus': 0x0007002d,
+        'Equal': 0x0007002e,
+        'BracketLeft': 0x0007002f,
+        'BracketRight': 0x00070030,
+        'Backslash': 0x00070031,
+        'Semicolon': 0x00070033,
+        'Quote': 0x00070034,
+        'Backquote': 0x00070035,
+        'Comma': 0x00070036,
+        'Period': 0x00070037,
+        'Slash': 0x00070038,
+      };
+      final vocabulary = HotkeyKeyCatalogue.registrableKeys();
+      for (final MapEntry(:key, :value) in usages.entries) {
+        expect(HotkeyKeyCatalogue.usbHidUsageFor(key), value, reason: key);
+        expect(HotkeyKeyCatalogue.labelForUsage(value), key);
+        expect(vocabulary.forUsage(value)?.label, key);
+      }
+    });
+
     test('AD-12: anything else is null, which is what the adapter turns into '
         'HotkeyUnavailable without touching the backend', () {
       for (final label in const <String>[
@@ -111,7 +145,7 @@ void main() {
       expect(collisions, isEmpty);
       expect(
         labels,
-        hasLength(26 + 10 + 12 + 15),
+        hasLength(26 + 10 + 12 + 15 + 11),
         reason:
             'the count is part of the claim: a run whose length drifted would '
             'otherwise leave the collision check passing over fewer keys',

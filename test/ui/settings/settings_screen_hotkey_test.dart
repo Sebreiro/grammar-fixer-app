@@ -49,35 +49,36 @@ void main() {
   /// Drives the capture the way a user does (D-14): click the box, hold the
   /// modifiers, press the key.
   ///
-  /// `platform: 'linux'` on every event, because that is the only platform this
-  /// app ships on and the raw-event half of the simulator needs a keymap.
+  /// Linux is the default simulator keymap. Shifted punctuation uses the web
+  /// simulator because the legacy GLFW map omits those symbols and apostrophe.
   Future<void> capture(
     WidgetTester tester,
     LogicalKeyboardKey key, {
     PhysicalKeyboardKey? physicalKey,
     List<LogicalKeyboardKey> holding = const [],
     bool release = true,
+    String platform = 'linux',
   }) async {
     await tester.tap(captureSurface);
     await tester.pump();
     for (final modifier in holding) {
-      await simulateKeyDownEvent(modifier, platform: 'linux');
+      await simulateKeyDownEvent(modifier, platform: platform);
     }
     await tester.pump();
     await simulateKeyDownEvent(
       key,
       physicalKey: physicalKey,
-      platform: 'linux',
+      platform: platform,
     );
     await tester.pump();
     if (release) {
       await simulateKeyUpEvent(
         key,
         physicalKey: physicalKey,
-        platform: 'linux',
+        platform: platform,
       );
       for (final modifier in holding.reversed) {
-        await simulateKeyUpEvent(modifier, platform: 'linux');
+        await simulateKeyUpEvent(modifier, platform: platform);
       }
     }
     await tester.pumpAndSettle();
@@ -844,6 +845,110 @@ void main() {
     expect(harness.configStore.current.hotkeyBinding, altSpace);
     expect(find.text('In effect: Alt+Space'), findsOneWidget);
   });
+
+  for (final (label, physicalKey, baseKey, shiftedKey) in const [
+    (
+      'Minus',
+      PhysicalKeyboardKey.minus,
+      LogicalKeyboardKey.minus,
+      LogicalKeyboardKey.underscore,
+    ),
+    (
+      'Equal',
+      PhysicalKeyboardKey.equal,
+      LogicalKeyboardKey.equal,
+      LogicalKeyboardKey.add,
+    ),
+    (
+      'BracketLeft',
+      PhysicalKeyboardKey.bracketLeft,
+      LogicalKeyboardKey.bracketLeft,
+      LogicalKeyboardKey.braceLeft,
+    ),
+    (
+      'BracketRight',
+      PhysicalKeyboardKey.bracketRight,
+      LogicalKeyboardKey.bracketRight,
+      LogicalKeyboardKey.braceRight,
+    ),
+    (
+      'Backslash',
+      PhysicalKeyboardKey.backslash,
+      LogicalKeyboardKey.backslash,
+      LogicalKeyboardKey.bar,
+    ),
+    (
+      'Semicolon',
+      PhysicalKeyboardKey.semicolon,
+      LogicalKeyboardKey.semicolon,
+      LogicalKeyboardKey.colon,
+    ),
+    (
+      'Quote',
+      PhysicalKeyboardKey.quote,
+      LogicalKeyboardKey.quoteSingle,
+      LogicalKeyboardKey.quote,
+    ),
+    (
+      'Backquote',
+      PhysicalKeyboardKey.backquote,
+      LogicalKeyboardKey.backquote,
+      LogicalKeyboardKey.tilde,
+    ),
+    (
+      'Comma',
+      PhysicalKeyboardKey.comma,
+      LogicalKeyboardKey.comma,
+      LogicalKeyboardKey.less,
+    ),
+    (
+      'Period',
+      PhysicalKeyboardKey.period,
+      LogicalKeyboardKey.period,
+      LogicalKeyboardKey.greater,
+    ),
+    (
+      'Slash',
+      PhysicalKeyboardKey.slash,
+      LogicalKeyboardKey.slash,
+      LogicalKeyboardKey.question,
+    ),
+  ]) {
+    for (final logicalKey in [baseKey, shiftedKey]) {
+      testWidgets('CAP-12: Ctrl+Shift+${logicalKey.keyLabel} is accepted and '
+          'saved as the $label shortcut', (tester) async {
+        await harness.pumpSettings(tester);
+        await capture(
+          tester,
+          logicalKey,
+          physicalKey: physicalKey,
+          // GLFW's legacy simulator map omits apostrophe and shifted symbols.
+          // The web simulator delivers the same KeyData to the capture widget.
+          platform: logicalKey == baseKey && label != 'Quote' ? 'linux' : 'web',
+          holding: const [
+            LogicalKeyboardKey.controlLeft,
+            LogicalKeyboardKey.shiftLeft,
+          ],
+        );
+
+        expect(find.text('Ctrl+Shift+$label'), findsOneWidget);
+        expect(
+          find.textContaining('not one this app can register'),
+          findsNothing,
+        );
+        await apply(tester);
+
+        final binding = HotkeyBinding(
+          modifiers: {HotkeyModifier.control, HotkeyModifier.shift},
+          key: label,
+        );
+        expect(harness.hotkey.bindCalls, [binding]);
+        expect(harness.configStore.writes.single.hotkeyBinding, binding);
+        expect(harness.configStore.current.hotkeyBinding, binding);
+        expect(find.text('In effect: Ctrl+Shift+$label'), findsOneWidget);
+      });
+    }
+  }
 
   testWidgets('D-13, D-15, T-01-36, T-01-37: a bare key and an AltGr '
       'combination are each refused at capture, with their own reason, and '
