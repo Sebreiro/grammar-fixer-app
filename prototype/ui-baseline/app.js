@@ -11,10 +11,22 @@
   let setupProvider = null;
   let pending = null;
   let settingsFailure = null;
+  let settingsSuccess = null;
+  let settingsCategory = "general";
   let mutationTimer = null;
   let shortcutDraft = config.shortcut;
   let capturing = false;
   const cardNodes = new Map();
+
+  function icon(name) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("icon");
+    svg.setAttribute("aria-hidden", "true");
+    const reference = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    reference.setAttribute("href", "#icon-" + name);
+    svg.append(reference);
+    return svg;
+  }
 
   function announce(id, message) {
     const notice = byId(id);
@@ -24,46 +36,86 @@
     const card = document.createElement("article");
     card.className = "card";
     card.dataset.register = register;
+    const heading = makeCardHeading({ label, key });
+    const description = document.createElement("p");
+    description.className = "card-description";
+    description.textContent = { formal: "Your wording, corrected", casual: "A conversational tone", shorter: "Fewer words" }[register];
+    const text = document.createElement("p");
+    text.className = "suggestion-text";
+    const { footer, copy, feedback } = makeCopyFooter({ register, label });
+    card.append(heading, description, text, footer);
+    wireCardSelection(card, register);
+    card.setAttribute("aria-keyshortcuts", key);
+    byId("cards").append(card);
+    cardNodes.set(register, { card, text, copy, feedback });
+  }
+  function makeCardHeading({ label, key }) {
     const heading = document.createElement("div");
     heading.className = "card-header";
     const title = document.createElement("strong");
-    title.textContent = key + "  " + label;
+    title.className = "card-title";
+    title.textContent = label;
+    const selected = document.createElement("span");
+    selected.className = "selection-icon";
+    selected.append(icon("check"));
+    title.append(selected);
+    const shortcut = document.createElement("kbd");
+    shortcut.textContent = key;
+    shortcut.title = "Press " + key + " with suggestions focused to select";
+    heading.append(title, shortcut);
+    return heading;
+  }
+  function makeCopyFooter({ register, label }) {
     const feedback = document.createElement("span");
     feedback.className = "copy-status";
     feedback.setAttribute("role", "status");
     const copy = document.createElement("button");
-    copy.textContent = "Copy";
+    copy.className = "copy-action";
+    copy.append(icon("copy"), document.createTextNode("Copy"));
     copy.setAttribute("aria-label", "Copy " + label);
     copy.addEventListener("click", event => { event.stopPropagation(); copySuggestion(register); });
-    heading.append(title, feedback, copy);
-    const text = document.createElement("p");
-    text.className = "suggestion-text";
-    card.append(heading, text);
+    const footer = document.createElement("div");
+    footer.className = "card-footer";
+    footer.append(feedback, copy);
+    return { footer, copy, feedback };
+  }
+  function wireCardSelection(card, register) {
     card.addEventListener("click", () => selectSuggestion(register));
-    byId("cards").append(card);
-    cardNodes.set(register, { card, text, copy, feedback });
+    card.addEventListener("keydown", event => {
+      if (event.target !== card || event.repeat || !["Enter", " "].includes(event.key)) return;
+      event.preventDefault(); selectSuggestion(register);
+    });
   }
   function renderPanel() {
     byId("correct").disabled = !panel.editor.trim();
-    byId("correction-status").textContent = panel.status === "running" ? "Correcting…" : "";
+    byId("correction-status").textContent = { idle: "Ready", running: "Correcting…", finished: "Complete", failed: "Failed" }[panel.status];
+    byId("correction-status").dataset.status = panel.status;
+    byId("correction-empty").hidden = panel.status !== "idle";
+    byId("cards").hidden = ["idle", "failed"].includes(panel.status);
     byId("correction-error").hidden = panel.status !== "failed";
     byId("error-message").textContent = panel.error;
     announce("correction-announcement", panel.status === "failed" ? panel.error
       : panel.status === "finished" ? "Correction complete." : "");
-    for (const [register, nodes] of cardNodes) {
-      const suggestion = panel.suggestions.find(item => item.register === register);
-      nodes.card.hidden = !suggestion || panel.status === "failed";
-      nodes.card.classList.toggle("partial", panel.status === "running");
-      nodes.card.classList.toggle("selected", panel.selected === register);
-      nodes.card.setAttribute("aria-label", (suggestion?.label || register) +
-        (panel.selected === register ? ", selected" : ""));
-      nodes.text.textContent = suggestion?.text || "";
-      nodes.copy.disabled = panel.status !== "finished" || !suggestion?.text.trim() ||
-        panel.copyStatuses[register] === "Copying…";
-      nodes.feedback.textContent = panel.copyStatuses[register] || "";
-    }
+    for (const [register, nodes] of cardNodes) renderCard(register, nodes);
+  }
+  function renderCard(register, nodes) {
+    const suggestion = panel.suggestions.find(item => item.register === register);
+    nodes.card.hidden = ["idle", "failed"].includes(panel.status);
+    nodes.card.tabIndex = panel.status === "finished" ? 0 : -1;
+    nodes.card.classList.toggle("partial", panel.status === "running");
+    nodes.card.classList.toggle("selected", panel.selected === register);
+    nodes.card.setAttribute("aria-label", (suggestion?.label || register) +
+      (panel.selected === register ? ", selected" : ""));
+    if (nodes.text.textContent !== (suggestion?.text || "")) nodes.text.textContent = suggestion?.text || "";
+    nodes.copy.disabled = panel.status !== "finished" || !suggestion?.text.trim() ||
+      panel.copyStatuses[register] === "Copying…";
+    nodes.feedback.textContent = panel.copyStatuses[register] || "";
+    nodes.feedback.classList.toggle("copy-error", nodes.feedback.textContent.includes("Couldn't copy"));
   }
   function startCorrection(text) {
+    runCorrection({ text, outcome: byId("correction-outcome").value });
+  }
+  function runCorrection({ text, outcome }) {
     if (!text.trim()) return;
     cancelStream();
     panel = state.startCorrection(panel, text, activePair());
@@ -73,7 +125,7 @@
       panel = { ...panel, ...change }; renderPanel();
     };
     cancelStream = fixtures.streamSample({
-      text, outcome: byId("correction-outcome").value,
+      text, outcome,
       onPartial: suggestions => update({ suggestions }),
       onFinished: suggestions => {
         update({ suggestions, status: "finished" });
@@ -92,7 +144,7 @@
   function selectSuggestion(register) {
     panel = state.selectSuggestion(panel, register);
     renderPanel();
-    if (panel.selected === register) cardNodes.get(register).card.scrollIntoView({ block: "nearest" });
+    if (panel.selected === register) cardNodes.get(register).card.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
   function copySuggestion(register) {
     const suggestion = panel.suggestions.find(item => item.register === register);
@@ -139,9 +191,17 @@
       input.checked = preset.id === config.activePreset;
       input.addEventListener("change", () => mutate({ kind: "activePreset", value: preset.id }));
       const text = document.createElement("span");
-      text.textContent = preset.id + " · " + preset.provider + " / " + preset.model;
+      const title = document.createElement("strong");
+      title.textContent = presetTitle(preset);
+      const model = document.createElement("small");
+      model.textContent = preset.model + " · prompt included";
+      text.append(title, model);
       label.append(input, text); byId("preset-choices").append(label);
     }
+  }
+  function presetTitle(preset) {
+    return { "default-formal-casual-shorter": "Everyday writing", "sample-fast": "Quick correction",
+      "sample-compatible": "Connected provider", "sample-custom": "Custom preset" }[preset.id] || preset.id;
   }
   function hotkeyFixture() {
     const scenario = byId("hotkey-scenario").value;
@@ -200,9 +260,35 @@
     byId("key-section").hidden = provider !== "openai-compatible";
     byId("sdk-notice").hidden = provider !== "claude-agent-sdk";
     byId("prompt-section").hidden = provider !== state.activePreset(config).provider;
+    byId("prompt-unavailable").hidden = !byId("prompt-section").hidden;
+    byId("edit-prompt").disabled = byId("prompt-section").hidden;
+    const activePreset = state.activePreset(config);
+    byId("active-prompt-preset").textContent = "Active preset: " + presetTitle(activePreset) + " · " + activePreset.model;
     renderPresets(); renderHotkey(); renderDraftGuards();
+    renderGroupFeedback();
     byId("committed-status").textContent = "Sample committed: " + config.activePreset +
       " · " + config.closeBehavior + " · " + config.logSize + " MiB";
+  }
+  function renderGroupFeedback() {
+    document.querySelectorAll("[data-feedback]").forEach(notice => {
+      const kind = notice.dataset.feedback;
+      const waiting = pending?.kind === kind;
+      const failure = settingsFailure?.action.kind === kind;
+      notice.dataset.tone = waiting ? "pending" : failure ? "error" : "success";
+      notice.textContent = waiting ? "Applying your change…" : failure ? settingsFailure.message
+        : settingsSuccess === kind ? "Saved. Your change is in effect." : "";
+    });
+  }
+  function showCategory(category) {
+    settingsCategory = category;
+    document.querySelectorAll(".category-tab").forEach(tab => {
+      const selected = tab.dataset.category === category;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      byId("category-" + tab.dataset.category).hidden = !selected;
+    });
+    byId("settings-category").value = category;
+    document.querySelector(".settings-form").scrollTop = 0;
   }
   function renderDraftGuards() {
     const validUrl = state.validBaseUrl(byId("base-url").value.trim());
@@ -225,13 +311,15 @@
       ? "Sample app has quit. Use Reset sample to restart."
       : "Sample window is " + visibility + ". Use a sample window action to return.";
     byId("window-status").textContent = visibility + " · " + surface;
+    document.querySelector(".window").dataset.surface = surface;
   }
   function openSettings() {
-    surface = "settings"; setupProvider = null; syncDrafts(); resetCapture();
+    surface = "settings"; capturing = false;
+    showCategory(settingsCategory);
     renderSettings(); renderWindow(); byId("back").focus();
   }
   function backToPanel() {
-    surface = "panel"; setupProvider = null; byId("api-key").value = ""; resetCapture();
+    surface = "panel"; byId("api-key").value = ""; capturing = false;
     renderWindow(); byId("editor").focus();
   }
   function mutate(action) {
@@ -258,6 +346,7 @@
       renderSettings(); return;
     }
     config = state.commitChange(config, action);
+    settingsSuccess = action.kind;
     if (settingsFailure?.action.kind === action.kind) settingsFailure = null;
     if (action.kind === "key") {
       byId("api-key").value = ""; byId("key-saved").textContent = "API key saved.";
@@ -311,7 +400,8 @@
   }
   function windowAction(action) {
     if (action === "reset") {
-      cancelStream(); clearTimeout(mutationTimer); pending = null; settingsFailure = null;
+      cancelStream(); clearTimeout(mutationTimer); pending = null; settingsFailure = null; settingsSuccess = null;
+      settingsCategory = "general"; showCategory(settingsCategory);
       config = state.initialConfig(); history = []; visibility = "dismissed"; surface = "panel";
       setupProvider = null; syncDrafts(); renderSettings();
       byId("clipboard-output").textContent = "Nothing copied.";
@@ -336,6 +426,23 @@
     renderWindow();
     if (visibility === "shown" && surface === "panel") byId("editor").focus();
   }
+  function previewScene(scene) {
+    cancelStream();
+    const text = scene === "blank" ? "" : scene === "long" ? fixtures.longInput : fixtures.sampleInput;
+    const generation = panel.generation + 1;
+    panel = { ...state.initialPanel(text), generation };
+    byId("editor").value = text;
+    visibility = "shown"; surface = "panel";
+    if (["completed", "long", "failed"].includes(scene)) {
+      panel = state.startCorrection(panel, text, activePair());
+      panel = { ...panel, status: scene === "failed" ? "failed" : "finished",
+        suggestions: scene === "failed" ? [] : fixtures.suggestionsFor(text),
+        selected: scene === "failed" ? null : "formal",
+        error: scene === "failed" ? "The provider stopped during correction. Try again." : "" };
+    }
+    renderPanel(); renderWindow();
+    if (scene === "streaming") runCorrection({ text, outcome: "preview" });
+  }
   function captureKey(event) {
     if (!capturing || event.repeat) return;
     event.preventDefault();
@@ -354,6 +461,27 @@
   }
   byId("open-settings").addEventListener("click", openSettings);
   byId("back").addEventListener("click", backToPanel);
+  document.querySelectorAll(".category-tab").forEach(tab => {
+    tab.addEventListener("click", () => showCategory(tab.dataset.category));
+    tab.addEventListener("keydown", event => {
+      const categories = ["general", "ai", "advanced"];
+      const offset = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+      if (offset === undefined && !["Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const index = categories.indexOf(settingsCategory);
+      const next = event.key === "Home" ? "general" : event.key === "End" ? "advanced"
+        : categories[(index + offset + categories.length) % categories.length];
+      showCategory(next); byId("tab-" + next).focus();
+    });
+  });
+  byId("settings-category").addEventListener("change", () => showCategory(byId("settings-category").value));
+  byId("edit-prompt").addEventListener("click", () => { showCategory("advanced"); byId("prompt").focus(); });
+  byId("preview-size").addEventListener("change", () => {
+    const frame = document.querySelector(".window");
+    frame.style.width = ""; frame.style.height = "";
+    frame.dataset.size = byId("preview-size").value;
+  });
+  byId("preview-scene").addEventListener("change", () => previewScene(byId("preview-scene").value));
   byId("close-behavior").addEventListener("change", () => mutate({ kind: "closeBehavior", value: byId("close-behavior").value }));
   byId("log-size").addEventListener("change", () => mutate({ kind: "logSize", value: byId("log-size").value }));
   document.querySelectorAll('input[name="provider"]').forEach(input =>
@@ -412,6 +540,6 @@
     if (byId("theme").value === "system") delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = byId("theme").value;
   });
-  renderPanel();
+  previewScene("completed");
   byId("editor").focus();
 })();

@@ -7,6 +7,8 @@ window.UiBaseline = {};
     { register: "shorter", label: "Short", key: "3" },
   ];
   const sampleInput = "I has a meeting tomorrow and I wants to know if you can joins.";
+  const longInput = ("I has a meeting tomorrow and I wants to know if you can joins. " +
+    "We will discuss the project, review the open questions, and agree on our next steps.\n\n").repeat(24);
   function suggestionsFor(text) {
     const corrected = text.replace(/\bI has\b/g, "I have")
       .replace(/\bI wants\b/g, "I want").replace(/\bcan joins\b/g, "can join");
@@ -28,11 +30,14 @@ window.UiBaseline = {};
       setTimeout(() => onPartial(results.map(item => ({
         ...item, text: item.text.slice(0, Math.ceil(item.text.length * .7)),
       }))), 420),
+    ];
+    // The external review scene holds genuine sample partials for visual inspection.
+    if (outcome !== "preview") timers.push(
       setTimeout(() => outcome === "success" ? onFinished(results)
         : onFailed(outcome === "timeout"
           ? "The correction timed out. Try again."
           : "The provider stopped during correction. Try again."), 800),
-    ];
+    );
     return () => timers.forEach(clearTimeout);
   }
   function copySample({ text, outcome, onResult }) {
@@ -44,6 +49,6 @@ window.UiBaseline = {};
     if (outcome === "pending") return null;
     return setTimeout(() => onResult(outcome), 600);
   }
-  window.UiBaseline.fixtures = { registers, sampleInput, suggestionsFor,
+  window.UiBaseline.fixtures = { registers, sampleInput, longInput, suggestionsFor,
     streamSample, copySample, mutateSample };
 })();
