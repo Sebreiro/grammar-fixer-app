@@ -1,33 +1,41 @@
-# Current UI baseline prototype
+# Focused command panel design prototype
 
-This static prototype mirrors the current correction panel and Settings for review before a later redesign. It approximates the existing indigo Material appearance; it does not change the Flutter app.
+This standalone HTML prototype applies the selected focused command panel brief. It explores a new appearance and preferences layout; Flutter implementation belongs to a later iteration. The existing `ui-baseline` entry path is retained so earlier links still work.
 
-Open [index.html](index.html) directly in a browser. No install or build is needed. Alternatively, from the repository root:
+Open [index.html](index.html) directly in a browser. No install or build is needed. Or, from the repository root:
 
 ```sh
 python3 -m http.server 8765 --bind 127.0.0.1
 ```
 
-Visit http://127.0.0.1:8765/prototype/ui-baseline/. The [UI and UX reference](../../docs/UI_UX_REFERENCE.md) lists source evidence, control behavior and source/contract differences.
+Visit http://127.0.0.1:8765/prototype/ui-baseline/. The [current Flutter UI and UX reference](../../docs/UI_UX_REFERENCE.md) remains a source-behavior reference.
 
-## Review the flows
+## Design direction
 
-1. Edit **Your text**, then **Correct** or editor-scoped **Ctrl+Enter**. Watch sample partials become **Corrected**, **Casual**, **Short**. Focus the suggestions region and press **1/2/3** to select. **Copy** updates the sample clipboard output and leaves the panel open.
-2. Choose **Mid-stream failure** or **Timeout** outside the app. Submit, edit the input, then choose **Complete** and **Retry**. Retry uses the submitted text.
-3. **Open settings** using the gear. Change a control while the external mutation outcome is **Hold pending**; use **Back**, reopen, and **Complete pending**. Choose **Failure**, make another change, then **Success** and repeat the original setting action to review recovery. The external **Repeat failed action (sample)** button is a review convenience; the app's Settings has no Retry button.
-4. Select the compatible provider, supply a sample URL/model, and save. Use dummy text only in **API key**; a successful save clears it. Try editing the prompt before **External config edit** to see the dirty-draft warning.
-5. Switch desktop shortcut fixtures to inspect authority and effective wording. Click the shortcut field to capture; bare Escape exits capture. Use the external window buttons to compare dismissal/fresh clipboard with minimize or focus loss/restoration. Native close follows the committed close preference; **Reset sample** restarts a simulated Quit.
+Neutral light and dark surfaces, system typography, restrained blue accents, a clear editor/action hierarchy and three adjacent variation cards. Each card has a visible Copy button, selection shortcut and independent text scrolling. The original stays above the results and scrolls separately. At constrained widths, cards scroll horizontally rather than becoming a stacked list: this resolves the brief's CAP-4 conflict in favor of the SPEC's side-by-side requirement.
 
-**System** appearance follows the browser's theme; external **Light/Dark** overrides aid review. The app frame can be resized using its bottom-right corner. Short frames scroll the whole panel; editor, suggestions and settings controls also scroll independently.
+Settings uses General / AI / Advanced navigation in the same frame. At compact widths it switches to a category selector. Model information stays with its preset; the AI category links to the active preset's prompt in Advanced. Technical details use expandable explanations. Controls distinguish immediate changes from Apply/Save, with pending, saved and failure feedback beside the affected group.
+
+## Review the design
+
+Use the **Preview controls** outside the app frame:
+
+1. Switch **Appearance** between System, Light and Dark. System follows the browser preference. Choose Comfortable, Compact or Wide, or resize the frame from its lower-right corner.
+2. **Panel scene** starts with completed sample variations so the design is visible immediately. Try Ready, Blank, Long text, held Streaming and Correction failure. Held Streaming shows the sample adapter's partials and waits until another scene or submission; ordinary correction still completes in 800 ms.
+3. Edit **Your text**, then **Correct** or editor-scoped **Ctrl+Enter**. Partial results cannot select or copy. After completion, click a card or focus Suggestions and press **1/2/3**; selection does not copy. Focused cards also select with Enter/Space. Digits in the editor remain ordinary text.
+4. Use each **Copy** button. Copying/Copied feedback stays beside that card and the panel stays open. Set **Next copy → Failure** to inspect the inline message, then retry the same Copy action. Expand **Simulated effects** to inspect exact sample clipboard output.
+5. Set **Next correction → Mid-stream failure** or **Timeout** and submit. Edit the input after failure, switch the outcome to Complete, then **Retry**: it uses the original submitted input, while keeping the edited draft.
+6. Open **Settings**. Use General / AI / Advanced, arrow keys/Home/End on the category tabs, or the compact selector. Category changes and Back/reopen preserve prompt and provider drafts without saving. Unsaved API key input clears on leaving, as disclosed beside the key field.
+7. Expand **Settings & desktop scenarios**. Choose **Hold pending**, change a setting, navigate or use Back, reopen and **Complete pending**. Pending guards prevent another mutation; navigation and Back remain available. For **Failure**, use the affected control's original Apply/Save action to recover. Failed saves keep committed values. The external replay button is only a review convenience.
+8. In AI, select the compatible provider, enter a sample URL/model and save. Use dummy API keys only. In Advanced, edit the prompt, then trigger **External config edit** to review dirty-draft protection and stale-save handling. The current preset is identified above the prompt.
+9. Inspect X11 and Wayland shortcut fixtures in General. Requested and effective bindings remain distinct. Window actions demonstrate dismissal/fresh clipboard versus restoration after focus loss or minimization.
 
 ## Sample limits
 
-All adapters use transient memory and fixed timers. No provider request, native clipboard, portal, tray, config file, keyring or database is accessed. The external history count records sample completions only; there is no history UI. Reload resets everything.
+All corrections, clipboard, configuration, history and desktop effects are simulated in transient memory. No provider request, native clipboard, portal, tray, config file, keyring, database or browser-storage write occurs. Reload resets the sample. The completed/long/error review scenes are fixtures and do not create sample history records; submissions do.
 
-The initial sentence has authored register variants. Other input is echoed with a few deterministic grammar substitutions; it is not an LLM or a correction-quality benchmark. Sample timings do not establish the native 100 ms summon target, streaming latency or resident RAM.
+The initial sentence has authored register variants. Other input uses a few deterministic substitutions and may produce identical variants. This demonstrates interaction and appearance, not model quality. Enter dummy credentials only: the masked key field never persists its value and a successful save clears it.
 
-The masked key field is for dummy input only. The prototype retains only sample key presence/source status, never the entered value in config/history/browser storage. Keep real credentials out of a review artifact.
+Sample timings and browser geometry do not validate native hotkeys, the 100 ms summon target, streaming latency, real persistence, text replacement, compositor behavior or resident RAM. The existing session/restoration fixtures are retained; hidden sample streams can finish, matching the documented current-source behavior. The AGENTS cancellation-on-hide discrepancy remains a later production concern recorded in the UI/UX reference.
 
-The scripts load locally in fixtures → state → app order. Playwright verification tooling lives under `/tmp` and is not a project dependency. Native desktop behavior and exact Flutter pixels require separate checks.
-
-Shortcut capture in this sample accepts letters and digits with Ctrl, Alt or Super. The Flutter app supports a wider key catalogue; use desktop-state fixtures to review other bindings.
+Scripts load locally in fixtures → state → app order. Browser verification tools stay under `/tmp`, outside project dependencies. The brief at `.planning/design/FOCUSED_COMMAND_PANEL_DESIGN_BRIEF.md` is the design input; SPEC and its companions remain authoritative and unchanged.

@@ -1,12 +1,12 @@
 # Current correction panel and settings UI and UX reference
 
-This reference records the existing Flutter baseline so a later design can preserve its actions and state behavior. Open the [clickable sample](../prototype/ui-baseline/index.html) and [review guide](../prototype/ui-baseline/README.md). The sample uses in-memory effects; its external scenario controls are not production UI.
+This reference records the existing Flutter baseline so a later design can preserve its actions and state behavior. The [HTML prototype](../prototype/ui-baseline/index.html) now demonstrates the selected focused command panel direction; see its [review guide](../prototype/ui-baseline/README.md). Its redesigned appearance and categorized settings have not been applied to Flutter. Sample effects run in memory; external scenario controls are not production UI.
 
 The [SPEC](../_bmad-output/specs/spec-hotkey-grammar-corrector/SPEC.md#capabilities) defines required behavior. The [provider contract](../_bmad-output/specs/spec-hotkey-grammar-corrector/llm-provider-contract.md), [risks](../_bmad-output/specs/spec-hotkey-grammar-corrector/risks.md), [roadmap](../PLAN.md) and [coding rules](../AGENTS.md) remain authoritative. The tables below describe observed source behavior, not changes to those documents.
 
 ## Appearance and layout
 
-The [app theme](../lib/src/ui/daemon_app.dart#L28) derives both system light and dark palettes from indigo. The sample approximates Material colors, rounded cards, outlined fields and filled actions with local CSS and system fonts; it is not a pixel-perfect Flutter rendering.
+The [app theme](../lib/src/ui/daemon_app.dart#L28) derives both system light and dark palettes from indigo. The design prototype explores neutral surfaces and a restrained blue accent with local CSS and system fonts. The source descriptions below remain a reference for the current Flutter app, rather than the redesigned sample's appearance.
 
 The [panel layout](../lib/src/ui/panel/correction_panel.dart#L335) reserves a top-right settings gutter and divides the editor/results region 2:3, with 12 px content padding. Above a text-scaled minimum height, both panes remain concurrently readable and scroll independently (CAP-10). Below that floor the entire panel scrolls. Cards stack vertically. Settings replaces the panel in the same native window. Its [notice band](../lib/src/ui/settings/settings_screen.dart#L274) stays above separately scrolling controls, capped at half the body; failure precedes pending.
 
@@ -68,7 +68,7 @@ Evidence: [visibility states](../lib/src/domain/panel/panel_visibility.dart#L12)
 
 | Difference | Treatment in this baseline |
 | --- | --- |
-| CAP-4 literally describes side-by-side variants; [current list](../lib/src/ui/panel/suggestion_list.dart#L109) stacks cards. | Preserve the source layout and record the wording difference. This alone does not establish failure of CAP-10's concurrent readability requirement. |
+| CAP-4 literally describes side-by-side variants; [current list](../lib/src/ui/panel/suggestion_list.dart#L109) stacks cards. | The redesigned HTML prototype uses adjacent cards in accordance with the SPEC. The Flutter discrepancy remains for the later implementation iteration; CAP-10's concurrent readability is checked independently. |
 | CAP-14 defines visible-panel toggle; [visible Settings summon](../lib/src/application/panel_controller.dart#L107) additionally returns to panel. | Include that settings-specific behavior; the SPEC does not explicitly forbid it. |
 | AGENTS §4.1 says hiding must be able to abandon a correction; [departure logic](../lib/src/application/correction_controller.dart#L429) says no departure cancels. | Mirror hidden completion for review and flag the tension. No Flutter or canonical document is changed. |
 | [Controller](../lib/src/application/correction_controller.dart#L207) describes a selection toggle; [widget](../lib/src/ui/panel/correction_panel.dart#L174) guards repeated selection. | Mirror visible repeated-selection behavior. |

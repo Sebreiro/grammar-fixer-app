@@ -1,8 +1,9 @@
 # grammar-fixer-app
 desktop extension app to instantly fix grammar
 
-Review the [clickable current UI baseline](prototype/ui-baseline/index.html) and
-its [UI and UX reference](docs/UI_UX_REFERENCE.md) before the next design iteration.
+Review the [focused command panel design prototype](prototype/ui-baseline/index.html)
+and its [review guide](prototype/ui-baseline/README.md). The [current Flutter UI and UX
+reference](docs/UI_UX_REFERENCE.md) records the behavior to preserve in a later app iteration.
 
 ## Developing
 
