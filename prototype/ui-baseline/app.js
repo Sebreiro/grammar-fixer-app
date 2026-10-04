@@ -17,6 +17,11 @@
   let shortcutDraft = config.shortcut;
   let capturing = false;
   const cardNodes = new Map();
+  const windowDimensions = new Map();
+  const previewSizes = {
+    panel: { comfortable: "Standard · 640 × 360", compact: "Compact · 520 × 360", wide: "Wide · 760 × 420" },
+    settings: { comfortable: "Standard · 840 × 650", compact: "Compact · 620 × 560", wide: "Wide · 960 × 720" },
+  };
 
   function icon(name) {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -37,17 +42,14 @@
     card.className = "card";
     card.dataset.register = register;
     const heading = makeCardHeading({ label, key });
-    const description = document.createElement("p");
-    description.className = "card-description";
-    description.textContent = { formal: "Your wording, corrected", casual: "A conversational tone", shorter: "Fewer words" }[register];
     const text = document.createElement("p");
     text.className = "suggestion-text";
-    const { footer, copy, feedback } = makeCopyFooter({ register, label });
-    card.append(heading, description, text, footer);
+    const { footer, copy, feedback, copyLabel } = makeCopyFooter({ register, label });
+    card.append(heading, text, footer);
     wireCardSelection(card, register);
     card.setAttribute("aria-keyshortcuts", key);
     byId("cards").append(card);
-    cardNodes.set(register, { card, text, copy, feedback });
+    cardNodes.set(register, { card, text, copy, feedback, copyLabel });
   }
   function makeCardHeading({ label, key }) {
     const heading = document.createElement("div");
@@ -62,7 +64,7 @@
     const shortcut = document.createElement("kbd");
     shortcut.textContent = key;
     shortcut.title = "Press " + key + " with suggestions focused to select";
-    heading.append(title, shortcut);
+    heading.append(shortcut, title);
     return heading;
   }
   function makeCopyFooter({ register, label }) {
@@ -71,13 +73,15 @@
     feedback.setAttribute("role", "status");
     const copy = document.createElement("button");
     copy.className = "copy-action";
-    copy.append(icon("copy"), document.createTextNode("Copy"));
+    const copyLabel = document.createElement("span");
+    copyLabel.textContent = "Copy";
+    copy.append(icon("copy"), copyLabel);
     copy.setAttribute("aria-label", "Copy " + label);
     copy.addEventListener("click", event => { event.stopPropagation(); copySuggestion(register); });
     const footer = document.createElement("div");
     footer.className = "card-footer";
     footer.append(feedback, copy);
-    return { footer, copy, feedback };
+    return { footer, copy, feedback, copyLabel };
   }
   function wireCardSelection(card, register) {
     card.addEventListener("click", () => selectSuggestion(register));
@@ -110,6 +114,8 @@
     nodes.copy.disabled = panel.status !== "finished" || !suggestion?.text.trim() ||
       panel.copyStatuses[register] === "Copying…";
     nodes.feedback.textContent = panel.copyStatuses[register] || "";
+    nodes.copyLabel.textContent = ["Copying…", "Copied"].includes(nodes.feedback.textContent)
+      ? nodes.feedback.textContent : "Copy";
     nodes.feedback.classList.toggle("copy-error", nodes.feedback.textContent.includes("Couldn't copy"));
   }
   function startCorrection(text) {
@@ -311,7 +317,18 @@
       ? "Sample app has quit. Use Reset sample to restart."
       : "Sample window is " + visibility + ". Use a sample window action to return.";
     byId("window-status").textContent = visibility + " · " + surface;
-    document.querySelector(".window").dataset.surface = surface;
+    renderWindowDimensions();
+  }
+  function renderWindowDimensions() {
+    const frame = document.querySelector(".window");
+    if (frame.dataset.surface !== surface) {
+      windowDimensions.set(frame.dataset.surface, { width: frame.style.width, height: frame.style.height });
+      const dimensions = windowDimensions.get(surface);
+      frame.style.width = dimensions?.width || "";
+      frame.style.height = dimensions?.height || "";
+      frame.dataset.surface = surface;
+    }
+    for (const option of byId("preview-size").options) option.textContent = previewSizes[surface][option.value];
   }
   function openSettings() {
     surface = "settings"; capturing = false;
@@ -479,6 +496,7 @@
   byId("preview-size").addEventListener("change", () => {
     const frame = document.querySelector(".window");
     frame.style.width = ""; frame.style.height = "";
+    windowDimensions.clear();
     frame.dataset.size = byId("preview-size").value;
   });
   byId("preview-scene").addEventListener("change", () => previewScene(byId("preview-scene").value));

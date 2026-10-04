@@ -69,7 +69,7 @@
           </span>
           <span>All effects simulated</span>
         </div>
-        <section class="window" aria-label="Hotkey Grammar Corrector" data-size="comfortable">
+        <section class="window" aria-label="Hotkey Grammar Corrector" data-size="comfortable" data-surface="panel">
           <div id="panel" class="panel">
             <header class="app-header">
               <div class="app-identity">
@@ -91,7 +91,6 @@
               <section class="original-pane" aria-label="Original text">
                 <div class="section-heading">
                   <label for="editor">Your text</label>
-                  <span class="section-note">Review or edit your original</span>
                 </div>
                 <div class="editor-surface">
                   <textarea id="editor" spellcheck="false" placeholder="Paste or write something to correct…"></textarea>
@@ -116,10 +115,6 @@
                 <div class="results-heading">
                   <div>
                     <h2>Suggestions</h2>
-                    <p>
-                      <span class="wide-results-help">Choose the wording that fits.</span>
-                      <span class="narrow-results-help">Scroll sideways for all three variations.</span>
-                    </p>
                   </div>
                   <span id="correction-status" class="status-badge" role="status"></span>
                 </div>
@@ -155,15 +150,6 @@
                 <div id="cards" class="result-cards"></div>
               </section>
             </div>
-            <footer class="panel-footer">
-              <span>
-                <kbd>1</kbd>
-                <kbd>2</kbd>
-                <kbd>3</kbd>
-                <span>select a result when focused</span>
-              </span>
-              <span>Copy a variation. Keep writing.</span>
-            </footer>
           </div>
           <section id="settings" class="settings" aria-label="Settings" hidden>
             <header class="settings-header">
@@ -426,9 +412,9 @@
         </select>
         <label for="preview-size">Window size</label>
         <select id="preview-size">
-          <option value="comfortable">Comfortable · 840 × 650</option>
-          <option value="compact">Compact · 620 × 560</option>
-          <option value="wide">Wide · 960 × 720</option>
+          <option value="comfortable">Standard · 640 × 360</option>
+          <option value="compact">Compact · 520 × 360</option>
+          <option value="wide">Wide · 760 × 420</option>
         </select>
         <label for="preview-scene">Panel scene</label>
         <select id="preview-scene">
