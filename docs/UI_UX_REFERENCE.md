@@ -68,7 +68,7 @@ Evidence: [visibility states](../lib/src/domain/panel/panel_visibility.dart#L12)
 
 | Difference | Treatment in this baseline |
 | --- | --- |
-| CAP-4 literally describes side-by-side variants; [current list](../lib/src/ui/panel/suggestion_list.dart#L109) stacks cards. | The redesigned HTML prototype uses adjacent cards in accordance with the SPEC. The Flutter discrepancy remains for the later implementation iteration; CAP-10's concurrent readability is checked independently. |
+| CAP-4 literally describes side-by-side variants; [current list](../lib/src/ui/panel/suggestion_list.dart#L109) stacks cards. | The user's subsequent design-prototype feedback explicitly requests compact stacked rows, which the HTML sample now explores. That prototype preference does not change SPEC CAP-4 or prove production compliance. The Flutter discrepancy remains for the later iteration; CAP-10's concurrent readability is checked independently. |
 | CAP-14 defines visible-panel toggle; [visible Settings summon](../lib/src/application/panel_controller.dart#L107) additionally returns to panel. | Include that settings-specific behavior; the SPEC does not explicitly forbid it. |
 | AGENTS §4.1 says hiding must be able to abandon a correction; [departure logic](../lib/src/application/correction_controller.dart#L429) says no departure cancels. | Mirror hidden completion for review and flag the tension. No Flutter or canonical document is changed. |
 | [Controller](../lib/src/application/correction_controller.dart#L207) describes a selection toggle; [widget](../lib/src/ui/panel/correction_panel.dart#L174) guards repeated selection. | Mirror visible repeated-selection behavior. |
