@@ -16,7 +16,9 @@
   let mutationTimer = null;
   let shortcutDraft = config.shortcut;
   let capturing = false;
+  let expandedRegister = null;
   const cardNodes = new Map();
+  const suggestionSizeObserver = new ResizeObserver(updateSuggestionExpansions);
   const windowDimensions = new Map();
   const previewSizes = {
     panel: { comfortable: "Standard · 840 × 650", compact: "Compact · 520 × 360", wide: "Wide · 760 × 420" },
@@ -44,12 +46,13 @@
     const heading = makeCardHeading({ label, key });
     const text = document.createElement("p");
     text.className = "suggestion-text";
-    const { footer, copy, feedback, copyLabel } = makeCopyFooter({ register, label });
+    const { footer, copy, feedback, copyLabel, expand } = makeCopyFooter({ register, label });
     card.append(heading, text, footer);
     wireCardSelection(card, register);
     card.setAttribute("aria-keyshortcuts", key);
     byId("cards").append(card);
-    cardNodes.set(register, { card, text, copy, feedback, copyLabel });
+    cardNodes.set(register, { card, text, copy, feedback, copyLabel, expand });
+    suggestionSizeObserver.observe(text);
   }
   function makeCardHeading({ label, key }) {
     const heading = document.createElement("div");
@@ -80,8 +83,23 @@
     copy.addEventListener("click", event => { event.stopPropagation(); copySuggestion(register); });
     const footer = document.createElement("div");
     footer.className = "card-footer";
-    footer.append(feedback, copy);
-    return { footer, copy, feedback, copyLabel };
+    const expand = makeExpansionButton({ register, label });
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+    actions.append(copy, expand);
+    footer.append(feedback, actions);
+    return { footer, copy, feedback, copyLabel, expand };
+  }
+  function makeExpansionButton({ register, label }) {
+    const expand = document.createElement("button");
+    expand.className = "expand-suggestion text-button";
+    expand.textContent = "Show more";
+    expand.hidden = true;
+    expand.setAttribute("aria-label", "Show full " + label + " suggestion");
+    expand.setAttribute("aria-controls", "expanded-suggestion");
+    expand.setAttribute("aria-expanded", "false");
+    expand.addEventListener("click", event => { event.stopPropagation(); expandSuggestion(register); });
+    return expand;
   }
   function wireCardSelection(card, register) {
     card.addEventListener("click", () => selectSuggestion(register));
@@ -101,6 +119,9 @@
     announce("correction-announcement", panel.status === "failed" ? panel.error
       : panel.status === "finished" ? "Correction complete." : "");
     for (const [register, nodes] of cardNodes) renderCard(register, nodes);
+    updateSuggestionExpansions();
+    if (panel.status !== "finished") closeExpandedSuggestion();
+    renderExpandedSuggestion();
   }
   function renderCard(register, nodes) {
     const suggestion = panel.suggestions.find(item => item.register === register);
@@ -111,12 +132,66 @@
     nodes.card.setAttribute("aria-label", (suggestion?.label || register) +
       (panel.selected === register ? ", selected" : ""));
     if (nodes.text.textContent !== (suggestion?.text || "")) nodes.text.textContent = suggestion?.text || "";
+    renderCopyStatus(register, nodes);
+  }
+  function renderCopyStatus(register, nodes) {
+    const suggestion = panel.suggestions.find(item => item.register === register);
     nodes.copy.disabled = panel.status !== "finished" || !suggestion?.text.trim() ||
       panel.copyStatuses[register] === "Copying…";
     nodes.feedback.textContent = panel.copyStatuses[register] || "";
     nodes.copyLabel.textContent = ["Copying…", "Copied"].includes(nodes.feedback.textContent)
       ? nodes.feedback.textContent : "Copy";
     nodes.feedback.classList.toggle("copy-error", nodes.feedback.textContent.includes("Couldn't copy"));
+  }
+  function updateSuggestionExpansions() {
+    for (const nodes of cardNodes.values()) {
+      nodes.expand.hidden = panel.status !== "finished" || nodes.text.scrollHeight <= nodes.text.clientHeight + 1;
+    }
+    positionExpandedSuggestion();
+  }
+  function expandSuggestion(register) {
+    if (panel.status !== "finished") return;
+    closeExpandedSuggestion();
+    expandedRegister = register;
+    renderExpandedSuggestion();
+    const expand = cardNodes.get(register).expand;
+    expand.setAttribute("aria-expanded", "true");
+    byId("expanded-suggestion").showPopover({ source: expand });
+    positionExpandedSuggestion();
+    byId("collapse-suggestion").focus();
+  }
+  function closeExpandedSuggestion() {
+    const expansion = byId("expanded-suggestion");
+    if (expansion.matches(":popover-open")) expansion.hidePopover();
+  }
+  function collapseSuggestion() {
+    const expand = cardNodes.get(expandedRegister)?.expand;
+    closeExpandedSuggestion();
+    expand?.focus();
+  }
+  function renderExpandedSuggestion() {
+    if (!expandedRegister) return;
+    const suggestion = panel.suggestions.find(item => item.register === expandedRegister);
+    if (!suggestion) { closeExpandedSuggestion(); return; }
+    byId("expanded-suggestion-title").textContent = suggestion.label;
+    byId("expanded-suggestion-text").textContent = suggestion.text;
+    byId("expanded-copy").setAttribute("aria-label", "Copy full " + suggestion.label + " suggestion");
+    renderCopyStatus(expandedRegister, {
+      copy: byId("expanded-copy"), feedback: byId("expanded-copy-status"), copyLabel: byId("expanded-copy-label"),
+    });
+  }
+  function positionExpandedSuggestion() {
+    const expansion = byId("expanded-suggestion");
+    if (!expandedRegister || !expansion.matches(":popover-open")) return;
+    const anchor = cardNodes.get(expandedRegister).card.getBoundingClientRect();
+    const frame = document.querySelector(".window").getBoundingClientRect();
+    const results = byId("cards").getBoundingClientRect();
+    const width = Math.min(anchor.width, window.innerWidth - 32);
+    expansion.style.width = width + "px";
+    expansion.style.maxHeight = Math.min(Math.max(320, results.height), frame.height - 32, window.innerHeight - 32) + "px";
+    expansion.style.left = Math.max(16, Math.min(anchor.left, window.innerWidth - width - 16)) + "px";
+    const height = expansion.getBoundingClientRect().height;
+    expansion.style.top = Math.max(16, Math.min(anchor.top, frame.bottom - height - 12, window.innerHeight - height - 16)) + "px";
   }
   function startCorrection(text) {
     runCorrection({ text, outcome: byId("correction-outcome").value });
@@ -310,6 +385,7 @@
   }
   function renderWindow() {
     const shown = visibility === "shown";
+    if (!shown || surface !== "panel") closeExpandedSuggestion();
     byId("panel").hidden = !shown || surface !== "panel";
     byId("settings").hidden = !shown || surface !== "settings";
     byId("hidden-window").hidden = shown;
@@ -445,6 +521,7 @@
   }
   function previewScene(scene) {
     cancelStream();
+    closeExpandedSuggestion();
     const text = scene === "blank" ? "" : scene === "long" ? fixtures.longInput : fixtures.sampleInput;
     const generation = panel.generation + 1;
     panel = { ...state.initialPanel(text), generation };
@@ -535,7 +612,24 @@
   byId("key-source-scenario").addEventListener("change", renderKeySource);
   document.querySelectorAll("[data-window]").forEach(button =>
     button.addEventListener("click", () => windowAction(button.dataset.window)));
-  window.addEventListener("pagehide", () => { cancelStream(); clearTimeout(mutationTimer); });
+  window.addEventListener("pagehide", () => {
+    cancelStream(); clearTimeout(mutationTimer); suggestionSizeObserver.disconnect();
+  });
+  window.addEventListener("resize", positionExpandedSuggestion);
+  document.addEventListener("scroll", positionExpandedSuggestion, true);
+  byId("collapse-suggestion").addEventListener("click", collapseSuggestion);
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || !byId("expanded-suggestion").matches(":popover-open")) return;
+    event.preventDefault(); collapseSuggestion();
+  });
+  byId("expanded-copy").addEventListener("click", () => {
+    if (expandedRegister) copySuggestion(expandedRegister);
+  });
+  byId("expanded-suggestion").addEventListener("beforetoggle", event => {
+    if (event.newState !== "closed" || !expandedRegister) return;
+    cardNodes.get(expandedRegister).expand.setAttribute("aria-expanded", "false");
+    expandedRegister = null;
+  });
   syncDrafts(); renderSettings(); renderWindow();
   fixtures.registers.forEach(makeCard);
   byId("editor").value = panel.editor;

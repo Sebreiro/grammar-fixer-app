@@ -513,8 +513,12 @@ kbd {
 }
 .suggestion-text {
   min-width: 0;
-  max-height: 4.5em;
-  overflow: auto;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  max-height: 7.5em;
+  overflow: hidden;
   grid-column: 2;
   grid-row: 1;
   font-size: .875rem;
@@ -528,6 +532,22 @@ kbd {
 }
 .card-footer {
   display: contents;
+}
+.card-actions {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.expand-suggestion {
+  min-height: 24px;
+  padding: 2px 4px;
+  font-size: .6875rem;
+}
+button.expand-suggestion {
+  color: var(--primary);
 }
 .copy-status {
   position: absolute;
@@ -550,8 +570,6 @@ kbd {
   overflow-wrap: anywhere;
 }
 .copy-action {
-  grid-column: 3;
-  grid-row: 1;
   width: 5.625rem;
   background: var(--surface);
   color: var(--foreground);
@@ -563,6 +581,55 @@ kbd {
 .copy-action .icon {
   width: 14px;
   height: 14px;
+}
+.suggestion-expansion {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 12px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: 0 12px 36px #26364d30;
+  overflow: hidden;
+}
+.suggestion-expansion:popover-open {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.expansion-header, .expansion-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.expansion-header h3 {
+  font-size: .8125rem;
+}
+.expansion-header button, .expansion-footer button {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: .75rem;
+}
+.expansion-text {
+  min-height: 0;
+  overflow: auto;
+  font-size: .875rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.expansion-copy-status {
+  font-size: .6875rem;
+  color: var(--success);
+}
+.expansion-copy-status.copy-error {
+  color: var(--error);
 }
 .empty-state {
   flex: 1;
@@ -1005,7 +1072,7 @@ kbd {
     grid-column: 1;
     grid-row: 2;
   }
-  .copy-action {
+  .card-actions {
     grid-column: 2;
     grid-row: 1 / 3;
   }

@@ -150,6 +150,20 @@
                 <div id="cards" class="result-cards"></div>
               </section>
             </div>
+            <section id="expanded-suggestion" class="suggestion-expansion" popover="auto" role="dialog" aria-labelledby="expanded-suggestion-title">
+              <header class="expansion-header">
+                <h3 id="expanded-suggestion-title"></h3>
+                <button id="collapse-suggestion" class="quiet-button">Show less</button>
+              </header>
+              <p id="expanded-suggestion-text" class="expansion-text"></p>
+              <footer class="expansion-footer">
+                <span id="expanded-copy-status" class="expansion-copy-status" role="status"></span>
+                <button id="expanded-copy" class="secondary">
+                  <svg class="icon" aria-hidden="true"><use href="#icon-copy"/></svg>
+                  <span id="expanded-copy-label">Copy</span>
+                </button>
+              </footer>
+            </section>
           </div>
           <section id="settings" class="settings" aria-label="Settings" hidden>
             <header class="settings-header">
