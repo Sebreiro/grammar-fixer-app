@@ -19,7 +19,7 @@
   const cardNodes = new Map();
   const windowDimensions = new Map();
   const previewSizes = {
-    panel: { comfortable: "Standard · 640 × 360", compact: "Compact · 520 × 360", wide: "Wide · 760 × 420" },
+    panel: { comfortable: "Standard · 840 × 650", compact: "Compact · 520 × 360", wide: "Wide · 760 × 420" },
     settings: { comfortable: "Standard · 840 × 650", compact: "Compact · 620 × 560", wide: "Wide · 960 × 720" },
   };
 
