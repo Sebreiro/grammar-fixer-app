@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "themes": {
+    "light": {
+      "pixelsIdentical": true,
+      "beforeSha256": "d224accacd3f293ce03f737fc75e9a1fe467b637aa434af0eafe28bdf7ea3ca7",
+      "afterSha256": "d224accacd3f293ce03f737fc75e9a1fe467b637aa434af0eafe28bdf7ea3ca7"
+    },
+    "dark": {
+      "pixelsIdentical": true,
+      "beforeSha256": "72717ea74402c28cd4b15b5478f19a80b232944efe28959879e1ff80a850b035",
+      "afterSha256": "72717ea74402c28cd4b15b5478f19a80b232944efe28959879e1ff80a850b035"
+    }
+  },
+  "computedStylesIdentical": true,
+  "elements": 172
+}

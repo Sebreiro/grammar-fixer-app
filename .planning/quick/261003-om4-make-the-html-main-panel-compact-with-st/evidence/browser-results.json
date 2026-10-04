@@ -1,0 +1,31 @@
+{
+  "status": "passed",
+  "checks": [
+    "Design default results are compact stacked rows readable with the original",
+    "Settings retain approved dimensions and manual panel resizing survives Back",
+    "CAP-3 blank and whitespace drafts disable Correct; scoped digits stay in editor",
+    "CAP-5 held review stream shows partial text but blocks selection and copy; stable geometry",
+    "CAP-3/4/5 edited input streams then completes; selection never copies",
+    "CAP-11/14 exact copy keeps panel and other copy actions usable; copy failure recovers",
+    "CAP-13 failure replaces partials and Retry uses submitted input after later editing",
+    "CAP-8/12 pending disables mutations while category navigation and Back remain usable",
+    "CAP-8 failed save stays inline and retains committed value; original control recovers",
+    "Settings category navigation and Back/reopen preserve unsaved prompt drafts without committing",
+    "CAP-8 external edits protect dirty prompt; stale pending save fails and original Save recovers",
+    "CAP-8 compatible URL/model stay drafts until saved; categories and Back preserve provider drafts",
+    "Masked API key clears after success and on Back; blank means keep existing key",
+    "AI prompt link identifies the active paired preset in Advanced",
+    "CAP-12 X11 effective and Wayland desktop binding remain distinct from preference; scoped capture",
+    "Settings tabs support arrow/Home/End navigation and visible focus",
+    "Compact preferences use the category selector and preserve dirty drafts",
+    "CAP-10 long source and stacked rows scroll independently at compact size",
+    "Narrow frame keeps rows within width and reveals keyboard-selected third row",
+    "200 percent text keeps app controls readable and preferences reachable",
+    "CAP-2/14 focus-loss restore keeps session; dismissed fresh summon seeds blank clipboard",
+    "Literal user text remains text; no remote requests/native clipboard/storage effects or page errors",
+    "Local prototype and documentation links resolve"
+  ],
+  "errors": [],
+  "requests": [],
+  "boundaryCalls": []
+}
