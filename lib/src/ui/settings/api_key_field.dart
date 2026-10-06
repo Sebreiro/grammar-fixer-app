@@ -4,22 +4,46 @@ import 'package:flutter/material.dart';
 
 /// Owns only the entered draft; stored credentials are never read into the field.
 class ApiKeyField extends StatefulWidget {
-  const ApiKeyField({required this.enabled, required this.onSave, super.key});
+  const ApiKeyField({
+    required this.enabled,
+    required this.onSave,
+    this.controller,
+    super.key,
+  });
 
   final bool enabled;
   final Future<bool> Function(String key) onSave;
+  final TextEditingController? controller;
 
   @override
   State<ApiKeyField> createState() => _ApiKeyFieldState();
 }
 
 class _ApiKeyFieldState extends State<ApiKeyField> {
-  final _keyController = TextEditingController();
+  TextEditingController? _ownedController;
+  TextEditingController get _keyController =>
+      widget.controller ??
+      _ownedController ??
+      (throw StateError('API key field has no controller'));
   bool _saved = false;
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.controller == null) _ownedController = TextEditingController();
+  }
+
+  @override
+  void didUpdateWidget(ApiKeyField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.controller == null && _ownedController == null) {
+      _ownedController = TextEditingController();
+    }
+  }
+
+  @override
   void dispose() {
-    _keyController.dispose();
+    _ownedController?.dispose();
     super.dispose();
   }
 

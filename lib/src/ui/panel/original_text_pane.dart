@@ -55,9 +55,13 @@ class OriginalTextPane extends StatefulWidget {
 }
 
 class _OriginalTextPaneState extends State<OriginalTextPane> {
-  late final TextEditingController _text = TextEditingController(
-    text: widget.text,
-  );
+  final TextEditingController _text = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _text.text = widget.text;
+  }
 
   @override
   void didUpdateWidget(OriginalTextPane oldWidget) {
@@ -84,46 +88,71 @@ class _OriginalTextPaneState extends State<OriginalTextPane> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text('Your text', style: Theme.of(context).textTheme.labelMedium),
-        const SizedBox(height: 4),
-        // Expanded plus `expands`: the editor takes a bounded share of the
-        // panel and scrolls inside it, so a long original cannot push the
-        // variants off screen (CAP-10).
-        Expanded(
-          child: TextField(
-            controller: _text,
-            focusNode: widget.focusNode,
-            autofocus: true,
-            expands: true,
-            maxLines: null,
-            minLines: null,
-            textAlignVertical: TextAlignVertical.top,
-            onChanged: widget.onChanged,
-            decoration: const InputDecoration(
-              isDense: true,
-              border: OutlineInputBorder(),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: Theme.of(context).colorScheme.outline),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Your text', style: Theme.of(context).textTheme.labelMedium),
+            const SizedBox(height: 4),
+            // Expanded plus `expands`: the editor takes a bounded share of the
+            // panel and scrolls inside it, so a long original cannot push the
+            // variants off screen (CAP-10).
+            Expanded(
+              child: TextField(
+                controller: _text,
+                focusNode: widget.focusNode,
+                autofocus: true,
+                expands: true,
+                maxLines: null,
+                minLines: null,
+                textAlignVertical: TextAlignVertical.top,
+                onChanged: widget.onChanged,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  filled: false,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerRight,
-          // The accelerator, said out loud. The panel dims a variant's 1/2/3
-          // hint when the key would do nothing, so the one keystroke it never
-          // mentioned at all was the one that starts the correction — on a
-          // surface whose whole premise is that it is driven from the keyboard.
-          child: Tooltip(
-            message: 'Correct (Ctrl+Enter)',
-            child: ElevatedButton(
-              onPressed: widget.onCorrect,
-              child: const Text('Correct'),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              // The accelerator, said out loud. The panel dims a variant's 1/2/3
+              // hint when the key would do nothing, so the one keystroke it never
+              // mentioned at all was the one that starts the correction — on a
+              // surface whose whole premise is that it is driven from the keyboard.
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  if (MediaQuery.sizeOf(context).width >= 240)
+                    Text(
+                      'Ctrl+Enter',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  Tooltip(
+                    message: 'Correct (Ctrl+Enter)',
+                    child: ElevatedButton(
+                      onPressed: widget.onCorrect,
+                      child: const Text('Correct'),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../application/composition/controller_providers.dart';
@@ -23,6 +24,8 @@ import 'preset_choice_list.dart';
 import 'provider_choice_list.dart';
 import 'settings_failure_notice.dart';
 import 'settings_pending_notice.dart';
+import 'settings_category.dart';
+import 'settings_draft_session.dart';
 
 /// The in-app settings surface: hotkey, active preset, and provider settings
 /// (CAP-8, CAP-12).
@@ -52,6 +55,109 @@ class SettingsScreen extends ConsumerStatefulWidget {
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
+class _SettingsBody extends StatelessWidget {
+  const _SettingsBody({
+    required this.category,
+    required this.categoryFocus,
+    required this.contentFocus,
+    required this.onSelected,
+    required this.child,
+  });
+  final SettingsCategory category;
+  final FocusNode categoryFocus;
+  final FocusNode contentFocus;
+  final ValueChanged<SettingsCategory> onSelected;
+  final Widget child;
+
+  KeyEventResult _navigate(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final index = SettingsCategory.values.indexOf(category);
+    final next = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowDown ||
+      LogicalKeyboardKey.arrowRight => (index + 1) % 3,
+      LogicalKeyboardKey.arrowUp ||
+      LogicalKeyboardKey.arrowLeft => (index + 2) % 3,
+      LogicalKeyboardKey.home => 0,
+      LogicalKeyboardKey.end => 2,
+      _ => null,
+    };
+    if (next == null) return KeyEventResult.ignored;
+    onSelected(SettingsCategory.values[next]);
+    return KeyEventResult.handled;
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final narrow =
+          constraints.maxWidth <= 680 ||
+          MediaQuery.textScalerOf(context).scale(13) > 20;
+      final navigation = Focus(
+        focusNode: categoryFocus,
+        onKeyEvent: _navigate,
+        child: narrow
+            ? Padding(
+                padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+                child: DropdownButtonFormField<SettingsCategory>(
+                  key: ValueKey(category),
+                  initialValue: category,
+                  decoration: const InputDecoration(
+                    labelText: 'Settings category',
+                  ),
+                  items: [
+                    for (final value in SettingsCategory.values)
+                      DropdownMenuItem(value: value, child: Text(value.label)),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) onSelected(value);
+                  },
+                ),
+              )
+            : SizedBox(
+                width: 136,
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      for (final value in SettingsCategory.values)
+                        ListTile(
+                          dense: true,
+                          selected: category == value,
+                          selectedTileColor: Theme.of(
+                            context,
+                          ).colorScheme.primaryContainer,
+                          title: Text(value.label),
+                          onTap: () => onSelected(value),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+      );
+      final content = Expanded(
+        child: Focus(
+          focusNode: contentFocus,
+          child: SingleChildScrollView(key: ValueKey(category), child: child),
+        ),
+      );
+      if (narrow && constraints.maxHeight < 180) {
+        return SingleChildScrollView(
+          child: Column(
+            children: [
+              navigation,
+              Focus(focusNode: contentFocus, child: child),
+            ],
+          ),
+        );
+      }
+      if (narrow) return Column(children: [navigation, content]);
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [navigation, const VerticalDivider(width: 1), content],
+      );
+    },
+  );
+}
+
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// Read once: `settingsControllerProvider` is a plain `Provider` whose value
   /// never changes in today's graph, and reading it is also what guarantees the
@@ -66,7 +172,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final StreamSubscription<void> _focusLosses;
 
   late SettingsState _state;
-  String? _setupProviderId;
+  final _keyController = TextEditingController();
+  final _categoryFocus = FocusNode();
+  final _contentFocus = FocusNode();
+  String? get _setupProviderId =>
+      ref.read(settingsDraftSessionProvider).setupProviderId;
   String _keySourceLabel = 'None configured';
   int _sourceGeneration = 0;
   int _captureGeneration = 0;
@@ -97,6 +207,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   void dispose() {
+    _keyController.clear();
+    _keyController.dispose();
+    _categoryFocus.dispose();
+    _contentFocus.dispose();
     unawaited(_changes.cancel());
     unawaited(_focusLosses.cancel());
     super.dispose();
@@ -115,9 +229,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           !state.mutationInFlight &&
           state.hotkeyBindOutcome is HotkeyRetained) {
         _captureGeneration++;
-      }
-      if (previous.config.activePresetId != state.config.activePresetId) {
-        _setupProviderId = null;
       }
     });
     if (previous.config != state.config) unawaited(_refreshKeySource());
@@ -185,10 +296,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   void _changeProvider(String providerId) {
     if (_state.presetForProvider(providerId) == null) {
-      setState(() => _setupProviderId = providerId);
+      ref
+          .read(settingsDraftSessionProvider.notifier)
+          .selectSetupProvider(providerId);
       return;
     }
-    setState(() => _setupProviderId = null);
+    ref.read(settingsDraftSessionProvider.notifier).selectSetupProvider(null);
     if (_state.activePreset?.providerId == providerId) return;
     unawaited(_controller.changeActiveProvider(providerId));
   }
@@ -202,6 +315,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<bool> _saveApiKey(String apiKey) async {
     final saved = await _controller.saveApiKey(apiKey);
+    if (saved && mounted && _keyController.text == apiKey) {
+      _keyController.clear();
+    }
     if (saved && mounted) unawaited(_refreshKeySource());
     return saved;
   }
@@ -226,8 +342,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     HotkeyUnavailable() || null => _state.config.hotkeyBinding,
   };
 
+  void _selectCategory(SettingsCategory category) {
+    ref.read(settingsDraftSessionProvider.notifier).selectCategory(category);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _contentFocus.requestFocus();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final drafts = ref.watch(settingsDraftSessionProvider);
+    final draftSession = ref.read(settingsDraftSessionProvider.notifier);
     final failure = _state.failure;
     final config = _state.config;
     final pending = _state.mutationInFlight;
@@ -240,6 +365,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     };
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 44,
+        surfaceTintColor: Colors.transparent,
         leading: BackButton(onPressed: widget.onBack),
         title: const Text('Settings'),
       ),
@@ -299,107 +426,160 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                 ),
               Expanded(
-                child: SingleChildScrollView(
+                child: _SettingsBody(
+                  category: drafts.category,
+                  categoryFocus: _categoryFocus,
+                  contentFocus: _contentFocus,
+                  onSelected: _selectCategory,
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        CloseBehaviorField(
-                          behavior: config.closeBehavior,
-                          enabled: enabled,
-                          onChanged: (behavior) => unawaited(
-                            _controller.changeCloseBehavior(behavior),
+                        if (drafts.category == SettingsCategory.general) ...[
+                          Text(
+                            "General",
+                            style: Theme.of(context).textTheme.titleMedium,
                           ),
-                        ),
-                        const Divider(height: 24),
-                        HotkeyStatusView(
-                          outcome: _state.hotkeyBindOutcome,
-                          backendDescription: _state.hotkeyBackendDescription,
-                          preference: config.hotkeyBinding,
-                        ),
-                        const SizedBox(height: 12),
-                        HotkeyCaptureField(
-                          key: ValueKey(_captureGeneration),
-                          binding: _captureBinding,
-                          authority: _authority,
-                          enabled: enabled,
-                          // Supplied by the controller (DW-71), never reached
-                          // for: the key vocabulary is built at the composition
-                          // root, because AD-1 forbids this ring importing the
-                          // infrastructure catalogue that holds it.
-                          validator: _controller.captureValidator,
-                          onApply: _changeHotkey,
-                        ),
-                        const Divider(height: 24),
-                        ProviderChoiceList(
-                          providerIds: providerIds,
-                          selectedProviderId: providerId,
-                          enabled: enabled,
-                          onSelect: _changeProvider,
-                        ),
-                        const SizedBox(height: 8),
-                        if (config.presets.any(
-                          (preset) => preset.providerId == providerId,
-                        ))
-                          PresetChoiceList(
-                            presets: config.presets
-                                .where(
-                                  (preset) => preset.providerId == providerId,
-                                )
-                                .toList(),
-                            activePresetId: config.activePresetId,
-                            enabled: enabled,
-                            onSelect: _changePreset,
-                          ),
-                        if (providerId == 'claude-agent-sdk')
                           const Text(
-                            'Uses your Claude Code sign-in on this computer.',
+                            "Changes apply immediately, except the shortcut which uses Apply.",
                           ),
-                        if (providerId ==
-                            ProviderConfig.compatibleProviderId) ...[
-                          const Divider(height: 24),
-                          CompatibleProviderForm(
-                            baseUrl: _state.compatibleBaseUrl,
-                            preset: _state.presetForProvider(
-                              ProviderConfig.compatibleProviderId,
-                            ),
+                          const SizedBox(height: 10),
+                          CloseBehaviorField(
+                            behavior: config.closeBehavior,
                             enabled: enabled,
-                            onSave: _saveProviderSettings,
+                            onChanged: (behavior) => unawaited(
+                              _controller.changeCloseBehavior(behavior),
+                            ),
                           ),
                           const Divider(height: 24),
-                          ApiKeyField(enabled: enabled, onSave: _saveApiKey),
-                          const SizedBox(height: 8),
-                          Text('API key source: $_keySourceLabel'),
-                          if (_keySourceLabel == 'Config file')
-                            const Text(
-                              'This API key is stored as plaintext in config.json. '
-                              'Move it to your system keyring or environment.',
-                            ),
+                          HotkeyStatusView(
+                            outcome: _state.hotkeyBindOutcome,
+                            backendDescription: _state.hotkeyBackendDescription,
+                            preference: config.hotkeyBinding,
+                          ),
+                          const SizedBox(height: 12),
+                          HotkeyCaptureField(
+                            key: ValueKey(_captureGeneration),
+                            binding: _captureBinding,
+                            authority: _authority,
+                            enabled: enabled,
+                            // Supplied by the controller (DW-71), never reached
+                            // for: the key vocabulary is built at the composition
+                            // root, because AD-1 forbids this ring importing the
+                            // infrastructure catalogue that holds it.
+                            validator: _controller.captureValidator,
+                            onApply: _changeHotkey,
+                          ),
+                          const Divider(height: 24),
                         ],
-                        if (_state.activePreset case final preset?
-                            when preset.providerId == providerId) ...[
-                          const Divider(height: 24),
-                          CorrectionPromptField(
-                            key: ValueKey(preset.id),
-                            prompt: preset.systemPrompt,
+                        if (drafts.category == SettingsCategory.ai) ...[
+                          Text(
+                            "AI",
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const Text(
+                            "Choose one provider and preset. Connection edits use Save.",
+                          ),
+                          const SizedBox(height: 10),
+                          ProviderChoiceList(
+                            providerIds: providerIds,
+                            selectedProviderId: providerId,
                             enabled: enabled,
-                            onSave: (prompt) => unawaited(
-                              _controller.changeCorrectionPrompt(
-                                preset: preset,
-                                systemPrompt: prompt,
+                            onSelect: _changeProvider,
+                          ),
+                          const SizedBox(height: 8),
+                          if (config.presets.any(
+                            (preset) => preset.providerId == providerId,
+                          ))
+                            PresetChoiceList(
+                              presets: config.presets
+                                  .where(
+                                    (preset) => preset.providerId == providerId,
+                                  )
+                                  .toList(),
+                              activePresetId: config.activePresetId,
+                              enabled: enabled,
+                              onSelect: _changePreset,
+                            ),
+                          if (providerId == 'claude-agent-sdk')
+                            const Text(
+                              'Uses your Claude Code sign-in on this computer.',
+                            ),
+                          if (providerId ==
+                              ProviderConfig.compatibleProviderId) ...[
+                            const Divider(height: 24),
+                            CompatibleProviderForm(
+                              drafts: drafts,
+                              onUrlChanged: draftSession.editUrl,
+                              onModelChanged: draftSession.editModel,
+                              baseUrl: _state.compatibleBaseUrl,
+                              preset: _state.presetForProvider(
+                                ProviderConfig.compatibleProviderId,
+                              ),
+                              enabled: enabled,
+                              onSave: _saveProviderSettings,
+                            ),
+                            const Divider(height: 24),
+                            ApiKeyField(
+                              enabled: enabled,
+                              onSave: _saveApiKey,
+                              controller: _keyController,
+                            ),
+                            const SizedBox(height: 8),
+                            Text('API key source: $_keySourceLabel'),
+                            const Text(
+                              "Unsaved key input is cleared when you leave Settings.",
+                            ),
+                            if (_keySourceLabel == 'Config file')
+                              const Text(
+                                'This API key is stored as plaintext in config.json. '
+                                'Move it to your system keyring or environment.',
+                              ),
+                          ],
+                          TextButton(
+                            onPressed: () =>
+                                _selectCategory(SettingsCategory.advanced),
+                            child: const Text(
+                              "Edit correction prompt in Advanced",
+                            ),
+                          ),
+                        ],
+                        if (drafts.category == SettingsCategory.advanced) ...[
+                          Text(
+                            "Advanced",
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const Text(
+                            "Prompt edits use Save; the log limit applies immediately.",
+                          ),
+                          if (_state.activePreset case final preset?) ...[
+                            Text("Active preset: ${preset.id}"),
+                            const Divider(height: 24),
+                            CorrectionPromptField(
+                              key: ValueKey(preset.id),
+                              prompt: preset.systemPrompt,
+                              draft: drafts.prompt,
+                              changedWhileEditing: drafts.promptConflict,
+                              onChanged: draftSession.editPrompt,
+                              enabled: enabled,
+                              onSave: (prompt) => unawaited(
+                                _controller.changeCorrectionPrompt(
+                                  preset: preset,
+                                  systemPrompt: prompt,
+                                ),
                               ),
                             ),
+                          ],
+                          const Divider(height: 24),
+                          LogSizeField(
+                            maxBytes: config.logMaxBytes,
+                            enabled: enabled,
+                            onChanged: (bytes) =>
+                                unawaited(_controller.changeLogMaxBytes(bytes)),
                           ),
+                          const Divider(height: 24),
                         ],
-                        const Divider(height: 24),
-                        LogSizeField(
-                          maxBytes: config.logMaxBytes,
-                          enabled: enabled,
-                          onChanged: (bytes) =>
-                              unawaited(_controller.changeLogMaxBytes(bytes)),
-                        ),
-                        const Divider(height: 24),
                       ],
                     ),
                   ),

@@ -11,6 +11,7 @@ import '../application/panel_controller.dart';
 import '../domain/logger.dart';
 import 'panel/correction_panel.dart';
 import 'settings/settings_screen.dart';
+import 'settings/settings_draft_session.dart';
 
 /// What the daemon's one window shows: the correction panel, or the settings
 /// screen (CAP-1, CAP-12).
@@ -22,9 +23,8 @@ import 'settings/settings_screen.dart';
 /// take focus away from a window whose own focus loss hides it (CAP-14), and no
 /// widget in this ring may show or hide anything (AD-4, AD-8).
 ///
-/// The Settings control sits in a reserved right gutter beside the editor.
-/// The panel keeps its measured height while every point inside the outlined
-/// editor remains a text-field hit target (PANEL-07).
+/// Settings opens from the compact panel header, leaving the editor surface
+/// available for text interaction (PANEL-07).
 ///
 /// **Any summon returns to the panel, and that takes two signals rather than
 /// one.** CAP-1 promises the hotkey summons the *correction panel*; a window that
@@ -82,6 +82,7 @@ class _DaemonHomeState extends ConsumerState<DaemonHome> {
     _controller = ref.read(correctionControllerProvider);
     _panelController = ref.read(panelControllerProvider);
     _logger = ref.read(loggerProvider);
+    ref.read(settingsDraftSessionProvider);
     _changes = _controller.changes.listen(
       _onStateChanged,
       onError: _onStateStreamError,
@@ -172,58 +173,6 @@ class _DaemonHomeState extends ConsumerState<DaemonHome> {
     if (_showingSettings) {
       return SettingsScreen(onBack: _returnToPanel);
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 200) {
-          return Column(
-            children: [
-              SizedBox(
-                height: 48,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: _SettingsAffordance(onPressed: _openSettings),
-                ),
-              ),
-              const Expanded(child: CorrectionPanel()),
-            ],
-          );
-        }
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            const CorrectionPanel(editorTrailingInset: 48),
-            Positioned(
-              top: 0,
-              right: 0,
-              child: _SettingsAffordance(onPressed: _openSettings),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// The gutter control that opens the settings screen.
-///
-/// Labelled, because an unlabelled icon is the whole affordance for a user who
-/// cannot see it — the tooltip is what carries the label to assistive technology
-/// as well as to a pointer. Keyboard-reachable for the same reason the panel is
-/// driven from the keyboard: this is a surface summoned by a hotkey, and a
-/// control only a mouse can reach is a control half the users of this app do not
-/// have.
-class _SettingsAffordance extends StatelessWidget {
-  const _SettingsAffordance({required this.onPressed});
-
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      onPressed: onPressed,
-      tooltip: 'Open settings',
-      visualDensity: VisualDensity.compact,
-      icon: const Icon(Icons.settings, size: 18),
-    );
+    return CorrectionPanel(onSettings: _openSettings);
   }
 }

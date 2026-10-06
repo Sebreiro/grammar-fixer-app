@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/config/provider_config.dart';
 import '../../domain/correction/preset.dart';
+import 'settings_draft_state.dart';
 
 /// Keeps endpoint/model drafts while committed values follow external edits.
 class CompatibleProviderForm extends StatefulWidget {
@@ -10,9 +11,15 @@ class CompatibleProviderForm extends StatefulWidget {
     required this.preset,
     required this.enabled,
     required this.onSave,
+    required this.drafts,
+    required this.onUrlChanged,
+    required this.onModelChanged,
     super.key,
   });
 
+  final SettingsDraftState drafts;
+  final ValueChanged<String> onUrlChanged;
+  final ValueChanged<String> onModelChanged;
   final String baseUrl;
   final Preset? preset;
   final bool enabled;
@@ -25,46 +32,23 @@ class CompatibleProviderForm extends StatefulWidget {
 class _CompatibleProviderFormState extends State<CompatibleProviderForm> {
   final _baseUrlController = TextEditingController();
   final _modelController = TextEditingController();
-  bool _baseUrlChangedWhileEditing = false;
-  bool _modelChangedWhileEditing = false;
 
   @override
   void initState() {
     super.initState();
-    _baseUrlController.text = widget.baseUrl;
-    _modelController.text = widget.preset?.model ?? '';
+    _baseUrlController.text = widget.drafts.url;
+    _modelController.text = widget.drafts.model;
   }
 
   @override
   void didUpdateWidget(CompatibleProviderForm oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _baseUrlChangedWhileEditing = _syncDraft(_baseUrlController, (
-      old: oldWidget.baseUrl,
-      current: widget.baseUrl,
-    ), _baseUrlChangedWhileEditing);
-    if (oldWidget.preset?.id != widget.preset?.id) {
-      _modelController.text = widget.preset?.model ?? '';
-      _modelChangedWhileEditing = false;
-      return;
+    if (_baseUrlController.text != widget.drafts.url) {
+      _baseUrlController.text = widget.drafts.url;
     }
-    _modelChangedWhileEditing = _syncDraft(_modelController, (
-      old: oldWidget.preset?.model ?? '',
-      current: widget.preset?.model ?? '',
-    ), _modelChangedWhileEditing);
-  }
-
-  static bool _syncDraft(
-    TextEditingController controller,
-    ({String old, String current}) values,
-    bool changedWhileEditing,
-  ) {
-    if (values.old != values.current && controller.text == values.old) {
-      controller.text = values.current;
-    } else if (values.old != values.current &&
-        controller.text != values.current) {
-      changedWhileEditing = true;
+    if (_modelController.text != widget.drafts.model) {
+      _modelController.text = widget.drafts.model;
     }
-    return controller.text != values.current && changedWhileEditing;
   }
 
   @override
@@ -73,15 +57,6 @@ class _CompatibleProviderFormState extends State<CompatibleProviderForm> {
     _modelController.dispose();
     super.dispose();
   }
-
-  void _draftChanged() => setState(() {
-    if (_baseUrlController.text == widget.baseUrl) {
-      _baseUrlChangedWhileEditing = false;
-    }
-    if (_modelController.text == (widget.preset?.model ?? '')) {
-      _modelChangedWhileEditing = false;
-    }
-  });
 
   bool get _saveEnabled =>
       widget.enabled &&
@@ -102,7 +77,7 @@ class _CompatibleProviderFormState extends State<CompatibleProviderForm> {
       TextField(
         controller: _baseUrlController,
         enabled: widget.enabled,
-        onChanged: (_) => _draftChanged(),
+        onChanged: widget.onUrlChanged,
         decoration: InputDecoration(
           labelText: 'Base URL',
           errorText: _baseUrlController.text.trim().isEmpty
@@ -114,14 +89,14 @@ class _CompatibleProviderFormState extends State<CompatibleProviderForm> {
       TextField(
         controller: _modelController,
         enabled: widget.enabled,
-        onChanged: (_) => _draftChanged(),
+        onChanged: widget.onModelChanged,
         decoration: InputDecoration(
           labelText: 'Model',
           errorText: _modelController.text.trim().isEmpty ? 'Required' : null,
         ),
       ),
       const SizedBox(height: 8),
-      if (_baseUrlChangedWhileEditing || _modelChangedWhileEditing)
+      if (widget.drafts.urlConflict || widget.drafts.modelConflict)
         const Text(
           'Provider settings changed while you were editing. '
           'Saving will replace those changes with your draft.',

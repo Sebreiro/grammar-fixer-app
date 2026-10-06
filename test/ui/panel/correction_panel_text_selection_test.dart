@@ -94,10 +94,14 @@ void main() {
       buttons: kSecondaryMouseButton,
     );
     await tester.pumpAndSettle();
-    expect(find.text('Copy'), findsOneWidget);
+    final menuCopy = find.descendant(
+      of: find.byType(DesktopTextSelectionToolbar),
+      matching: find.text('Copy'),
+    );
+    expect(menuCopy, findsOneWidget);
     expect(find.text('Cut'), findsNothing);
     expect(find.text('Paste'), findsNothing);
-    await tester.tap(find.text('Copy'));
+    await tester.tap(menuCopy);
     await tester.pumpAndSettle();
   }
 
@@ -276,7 +280,10 @@ void main() {
           widget.register == SuggestionRegister.values.first,
     );
     await tester.tap(
-      find.descendant(of: first, matching: find.byType(IconButton)),
+      find.descendant(
+        of: first,
+        matching: find.widgetWithText(TextButton, "Copy"),
+      ),
     );
     await tester.pump();
     await tester.pump();

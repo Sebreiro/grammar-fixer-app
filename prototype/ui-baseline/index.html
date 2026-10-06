@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Grammar Corrector — focused command panel prototype</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="fixtures.js"></script>
+    <script defer src="state.js"></script>
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <svg class="icon-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="icon-check" viewBox="0 0 24 24">
+        <path d="m5 12 4 4L19 6"/>
+      </symbol>
+      <symbol id="icon-copy" viewBox="0 0 24 24">
+        <rect x="8" y="8" width="12" height="13" rx="2"/>
+        <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>
+      </symbol>
+      <symbol id="icon-settings" viewBox="0 0 24 24">
+        <path d="M4 7h16M4 17h16"/>
+        <circle cx="9" cy="7" r="3"/>
+        <circle cx="15" cy="17" r="3"/>
+      </symbol>
+      <symbol id="icon-arrow" viewBox="0 0 24 24">
+        <path d="M5 12h14m-5-5 5 5-5 5"/>
+      </symbol>
+      <symbol id="icon-back" viewBox="0 0 24 24">
+        <path d="M19 12H5m5-5-5 5 5 5"/>
+      </symbol>
+      <symbol id="icon-text" viewBox="0 0 24 24">
+        <path d="M4 5h16M8 5v14m8-14v14M5 19h6m2 0h6"/>
+      </symbol>
+      <symbol id="icon-keyboard" viewBox="0 0 24 24">
+        <rect x="3" y="5" width="18" height="14" rx="3"/>
+        <path d="M7 9h.01M11 9h.01M15 9h.01M17 13h.01M7 13h.01M10 15h4"/>
+      </symbol>
+      <symbol id="icon-spark" viewBox="0 0 24 24">
+        <path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"/>
+      </symbol>
+      <symbol id="icon-alert" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M12 7v6m0 4h.01"/>
+      </symbol>
+    </svg>
+    <header class="review-header">
+      <div>
+        <p class="eyebrow">
+          DESIGN STUDY
+          <span>/ 01</span>
+        </p>
+        <h1>Focused command panel</h1>
+        <p class="review-description">
+          A quieter workspace for your words. Explore the panel and preferences before the Flutter iteration.
+        </p>
+      </div>
+      <a class="reference-link" href="../../docs/UI_UX_REFERENCE.md">
+        Current app reference
+        <span aria-hidden="true">↗</span>
+      </a>
+    </header>
+    <main class="review-layout">
+      <div class="preview-stage">
+        <div class="stage-caption">
+          <span>
+            <span class="sample-dot"></span>
+            Interactive design prototype
+          </span>
+          <span>All effects simulated</span>
+        </div>
+        <section class="window" aria-label="Hotkey Grammar Corrector" data-size="comfortable" data-surface="panel">
+          <div id="panel" class="panel">
+            <header class="app-header">
+              <div class="app-identity">
+                <span class="app-mark" aria-hidden="true">
+                  <svg class="icon">
+                    <use href="#icon-check"/>
+                  </svg>
+                </span>
+                <span>Grammar Corrector</span>
+              </div>
+              <button id="open-settings" class="quiet-button settings-toggle" aria-label="Open settings" title="Open settings">
+                <svg class="icon" aria-hidden="true">
+                  <use href="#icon-settings"/>
+                </svg>
+                <span>Settings</span>
+              </button>
+            </header>
+            <div class="panel-content">
+              <section class="original-pane" aria-label="Original text">
+                <div class="section-heading">
+                  <label for="editor">Your text</label>
+                </div>
+                <div class="editor-surface">
+                  <textarea id="editor" spellcheck="false" placeholder="Paste or write something to correct…"></textarea>
+                  <div class="editor-actions">
+                    <span class="keyboard-hint">
+                      <kbd>Ctrl</kbd>
+                      <span>+</span>
+                      <kbd>Enter</kbd>
+                      <span class="hint-label">to correct</span>
+                    </span>
+                    <button id="correct" title="Correct (Ctrl+Enter)">
+                      Correct
+                      <svg class="icon" aria-hidden="true">
+                        <use href="#icon-arrow"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </section>
+              <section id="suggestions" class="suggestions-pane" tabindex="0" aria-label="Suggestions">
+                <p id="correction-announcement" class="screen-reader-only" role="status" aria-atomic="true"></p>
+                <div class="results-heading">
+                  <div>
+                    <h2>Suggestions</h2>
+                  </div>
+                  <span id="correction-status" class="status-badge" role="status"></span>
+                </div>
+                <div id="correction-empty" class="empty-state">
+                  <span class="empty-icon">
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-text"/>
+                    </svg>
+                  </span>
+                  <h3>A little clarity starts here.</h3>
+                  <p>
+                    Edit your text above, then choose Correct.
+                    <br>
+                    Your three variations will appear together.
+                  </p>
+                </div>
+                <div id="correction-error" class="error correction-error" hidden>
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#icon-alert"/>
+                  </svg>
+                  <div>
+                    <h3>Couldn't finish this correction</h3>
+                    <p id="error-message"></p>
+                    <p class="helper">Retry uses the text from your last submission.</p>
+                    <button id="retry" class="secondary">
+                      Retry
+                      <svg class="icon" aria-hidden="true">
+                        <use href="#icon-arrow"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div id="cards" class="result-cards"></div>
+              </section>
+            </div>
+            <section id="expanded-suggestion" class="suggestion-expansion" popover="auto" role="dialog" aria-labelledby="expanded-suggestion-title">
+              <header class="expansion-header">
+                <h3 id="expanded-suggestion-title"></h3>
+                <button id="collapse-suggestion" class="quiet-button">Show less</button>
+              </header>
+              <p id="expanded-suggestion-text" class="expansion-text"></p>
+              <footer class="expansion-footer">
+                <span id="expanded-copy-status" class="expansion-copy-status" role="status"></span>
+                <button id="expanded-copy" class="secondary">
+                  <svg class="icon" aria-hidden="true"><use href="#icon-copy"/></svg>
+                  <span id="expanded-copy-label">Copy</span>
+                </button>
+              </footer>
+            </section>
+          </div>
+          <section id="settings" class="settings" aria-label="Settings" hidden>
+            <header class="settings-header">
+              <button id="back" class="quiet-button" aria-label="Back">
+                <svg class="icon" aria-hidden="true">
+                  <use href="#icon-back"/>
+                </svg>
+                <span>Back</span>
+              </button>
+              <h2>Settings</h2>
+              <span class="settings-header-note">Make it yours</span>
+            </header>
+            <p id="settings-announcement" class="screen-reader-only" role="status" aria-atomic="true"></p>
+            <div class="notices screen-reader-only">
+              <div id="settings-failure" hidden>
+                <p id="settings-error-message"></p>
+              </div>
+              <p id="settings-pending" hidden>Applying your change…</p>
+            </div>
+            <div class="settings-body">
+              <nav class="settings-nav" aria-label="Settings categories">
+                <div role="tablist" aria-label="Settings category" aria-orientation="vertical">
+                  <button id="tab-general" class="category-tab" role="tab" aria-controls="category-general" aria-selected="true" data-category="general">
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-keyboard"/>
+                    </svg>
+                    General
+                  </button>
+                  <button id="tab-ai" class="category-tab" role="tab" aria-controls="category-ai" aria-selected="false" tabindex="-1" data-category="ai">
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-spark"/>
+                    </svg>
+                    AI
+                  </button>
+                  <button id="tab-advanced" class="category-tab" role="tab" aria-controls="category-advanced" aria-selected="false" tabindex="-1" data-category="advanced">
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-settings"/>
+                    </svg>
+                    Advanced
+                  </button>
+                </div>
+                <p>AI changes apply to your next correction.</p>
+              </nav>
+              <div class="settings-workspace">
+                <div class="compact-category">
+                  <label for="settings-category">Category</label>
+                  <select id="settings-category">
+                    <option value="general">General</option>
+                    <option value="ai">AI</option>
+                    <option value="advanced">Advanced</option>
+                  </select>
+                </div>
+                <div class="settings-form">
+                  <fieldset id="settings-controls">
+                    <section id="category-general" role="tabpanel" aria-labelledby="tab-general" class="category-panel">
+                      <div class="category-heading">
+                        <h3>General</h3>
+                        <p>A shortcut to better writing.</p>
+                      </div>
+                      <section class="setting-group">
+                        <div class="group-heading">
+                          <h4>Global shortcut</h4>
+                          <span class="apply-note">Apply to save</span>
+                        </div>
+                        <p class="group-description">Bring the panel into focus from wherever you're writing.</p>
+                        <div id="hotkey-status" class="binding-status"></div>
+                        <label id="shortcut-label" for="capture">Shortcut</label>
+                        <button id="capture" class="shortcut-capture secondary" type="button">Ctrl+Shift+G</button>
+                        <p id="capture-feedback" class="helper">Click to record a shortcut.</p>
+                        <details class="technical-detail">
+                          <summary>About your current binding</summary>
+                          <p id="current-shortcut-hint" class="helper"></p>
+                          <p class="helper">
+                            On X11, the app sets the shortcut. On Wayland, your desktop chooses the effective binding; this field submits your preference.
+                          </p>
+                        </details>
+                        <div class="setting-actions">
+                          <button id="keep-shortcut" class="quiet-button">Keep current</button>
+                          <button id="apply-shortcut">Apply shortcut</button>
+                        </div>
+                        <p class="group-feedback" data-feedback="shortcut" role="status"></p>
+                      </section>
+                      <section class="setting-group">
+                        <div class="group-heading">
+                          <h4>Window behavior</h4>
+                          <span class="apply-note">Applies immediately</span>
+                        </div>
+                        <p class="group-description">Choose what happens when you close the window.</p>
+                        <label for="close-behavior">When closing the window</label>
+                        <select id="close-behavior">
+                          <option value="closeToTray">Close to tray</option>
+                          <option value="quit">Quit app</option>
+                        </select>
+                        <p class="helper">Close to tray keeps the app ready for your next shortcut.</p>
+                        <p class="group-feedback" data-feedback="closeBehavior" role="status"></p>
+                      </section>
+                    </section>
+                    <section id="category-ai" role="tabpanel" aria-labelledby="tab-ai" class="category-panel" hidden>
+                      <div class="category-heading">
+                        <h3>AI</h3>
+                        <p>Your provider. Your preferred preset.</p>
+                      </div>
+                      <section class="setting-group">
+                        <div class="group-heading">
+                          <h4>Correction provider</h4>
+                          <span class="apply-note">Configured choices apply immediately</span>
+                        </div>
+                        <p class="group-description">One provider serves each correction.</p>
+                        <fieldset>
+                          <legend class="screen-reader-only">AI provider</legend>
+                          <label class="choice">
+                            <input type="radio" name="provider" value="claude-agent-sdk">
+                            <span>
+                              <strong>Claude Agent SDK</strong>
+                              <small>Uses your Claude Code sign-in</small>
+                            </span>
+                          </label>
+                          <label class="choice">
+                            <input type="radio" name="provider" value="openai-compatible">
+                            <span>
+                              <strong>OpenAI-compatible</strong>
+                              <small>Connect a provider using its URL</small>
+                            </span>
+                          </label>
+                          <label class="choice" id="custom-provider" hidden>
+                            <input type="radio" name="provider" value="sample-local">
+                            <span>
+                              <strong>sample-local</strong>
+                              <small>Custom provider from sample config</small>
+                            </span>
+                          </label>
+                        </fieldset>
+                        <p id="sdk-notice" class="helper">Uses your Claude Code sign-in on this computer.</p>
+                        <p class="group-feedback" data-feedback="activePreset" role="status"></p>
+                        <fieldset id="preset-section">
+                          <legend>Preset</legend>
+                          <p class="helper">A model and correction prompt, paired together.</p>
+                          <div id="preset-choices"></div>
+                        </fieldset>
+                        <button id="edit-prompt" class="text-button" type="button">
+                          Edit correction prompt in Advanced
+                          <span aria-hidden="true">↗</span>
+                        </button>
+                      </section>
+                      <section id="compatible-section" class="setting-group" hidden>
+                        <div class="group-heading">
+                          <h4>Provider connection</h4>
+                          <span class="apply-note">Save to apply</span>
+                        </div>
+                        <p id="provider-setup-notice" class="info-notice">
+                          Save the URL and model to activate this provider. Your current provider stays active until then.
+                        </p>
+                        <label for="base-url">Base URL</label>
+                        <input id="base-url" type="text" autocomplete="off" spellcheck="false" placeholder="https://your-provider.example/v1">
+                        <p id="url-error" class="warning validation-message"></p>
+                        <label for="model">Model for this preset</label>
+                        <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="Model identifier">
+                        <p id="model-required" class="warning" hidden>Required</p>
+                        <p class="helper">The model stays paired with the correction prompt.</p>
+                        <p id="provider-warning" class="helper warning" hidden>
+                          Provider settings changed while you were editing. Saving will replace those changes with your draft.
+                        </p>
+                        <div class="setting-actions">
+                          <button id="save-provider">Save provider settings</button>
+                        </div>
+                        <p class="group-feedback" data-feedback="provider" role="status"></p>
+                      </section>
+                      <section id="key-section" class="setting-group" hidden>
+                        <div class="group-heading">
+                          <h4>Authentication</h4>
+                          <span class="apply-note">Save to apply</span>
+                        </div>
+                        <label for="api-key">API key</label>
+                        <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Enter a sample key">
+                        <p class="helper">Leave blank to keep the existing key. Unsaved key input is cleared when you leave Settings.</p>
+                        <div class="setting-actions">
+                          <button id="save-key">Save API key</button>
+                          <p id="key-saved" role="status"></p>
+                        </div>
+                        <p id="key-source" class="helper">API key source: None</p>
+                        <details class="technical-detail">
+                          <summary>Where the key is saved</summary>
+                          <p class="helper">Saved to your system keyring, or to config if the keyring is unavailable.</p>
+                        </details>
+                        <p id="key-plaintext" class="helper warning" hidden>
+                          This API key is stored as plaintext in config.json. Move it to your system keyring or environment.
+                        </p>
+                        <p class="group-feedback" data-feedback="key" role="status"></p>
+                      </section>
+                    </section>
+                    <section id="category-advanced" role="tabpanel" aria-labelledby="tab-advanced" class="category-panel" hidden>
+                      <div class="category-heading">
+                        <h3>Advanced</h3>
+                        <p>Fine-tune how corrections work.</p>
+                      </div>
+                      <section id="prompt-section" class="setting-group">
+                        <div class="group-heading">
+                          <h4>Correction prompt</h4>
+                          <span class="apply-note">Save to apply</span>
+                        </div>
+                        <p id="active-prompt-preset" class="group-description"></p>
+                        <label for="prompt">Instructions for this preset</label>
+                        <textarea id="prompt" spellcheck="false"></textarea>
+                        <p class="helper">The app adds the required response format automatically. Model and prompt remain one preset.</p>
+                        <p id="prompt-warning" class="helper warning" hidden>
+                          The correction prompt changed while you were editing. Saving will replace that change with your draft.
+                        </p>
+                        <p id="prompt-required" class="warning" hidden>Required</p>
+                        <div class="setting-actions">
+                          <button id="save-prompt">Save prompt</button>
+                        </div>
+                        <p class="group-feedback" data-feedback="prompt" role="status"></p>
+                      </section>
+                      <p id="prompt-unavailable" class="info-notice" hidden>
+                        Finish setting up your provider in AI to edit its preset's prompt.
+                      </p>
+                      <section class="setting-group">
+                        <div class="group-heading">
+                          <h4>Logging</h4>
+                          <span class="apply-note">Applies immediately</span>
+                        </div>
+                        <p class="group-description">Limit how large a local log file can grow.</p>
+                        <label for="log-size">Log file size limit</label>
+                        <select id="log-size">
+                          <option value="1">1 MiB</option>
+                          <option value="2" id="custom-log-size" hidden>2 MiB</option>
+                          <option value="5">5 MiB</option>
+                          <option value="10">10 MiB</option>
+                        </select>
+                        <p class="group-feedback" data-feedback="logSize" role="status"></p>
+                      </section>
+                    </section>
+                  </fieldset>
+                </div>
+              </div>
+            </div>
+          </section>
+          <div id="hidden-window" class="hidden-window" hidden>
+            <span class="empty-icon">
+              <svg class="icon" aria-hidden="true">
+                <use href="#icon-keyboard"/>
+              </svg>
+            </span>
+            <p id="visibility-message"></p>
+          </div>
+        </section>
+        <p class="stage-footnote">Resize the frame from its lower-right corner. The original and each variation scroll independently.</p>
+      </div>
+      <aside class="scenarios" aria-label="Sample scenario controls">
+        <div class="review-controls-heading">
+          <h2>Preview controls</h2>
+          <span class="review-tag">Outside the app</span>
+        </div>
+        <p>Responses, clipboard, settings and desktop actions are simulated in memory. Nothing is sent or saved.</p>
+        <label for="theme">Appearance</label>
+        <select id="theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <label for="preview-size">Window size</label>
+        <select id="preview-size">
+          <option value="comfortable">Standard · 840 × 650</option>
+          <option value="compact">Compact · 520 × 360</option>
+          <option value="wide">Wide · 760 × 420</option>
+        </select>
+        <label for="preview-scene">Panel scene</label>
+        <select id="preview-scene">
+          <option value="completed">Completed variations</option>
+          <option value="idle">Ready to correct</option>
+          <option value="blank">Blank editor</option>
+          <option value="long">Long text</option>
+          <option value="streaming">Streaming sample (held)</option>
+          <option value="failed">Correction failure</option>
+        </select>
+        <label for="correction-outcome">Next correction</label>
+        <select id="correction-outcome">
+          <option value="success">Complete</option>
+          <option value="error">Mid-stream failure</option>
+          <option value="timeout">Timeout</option>
+        </select>
+        <label for="copy-outcome">Next copy</label>
+        <select id="copy-outcome">
+          <option value="success">Success</option>
+          <option value="failure">Failure</option>
+        </select>
+        <details class="scenario-details">
+          <summary>Settings &amp; desktop scenarios</summary>
+          <div id="extra-scenarios">
+            <label for="settings-outcome">Settings mutation outcome</label>
+            <select id="settings-outcome">
+              <option value="success">Success</option>
+              <option value="failure">Failure</option>
+              <option value="pending">Hold pending</option>
+            </select>
+            <div class="scenario-actions">
+              <button id="resolve-settings" class="secondary">Complete pending</button>
+              <button id="settings-retry" class="secondary" hidden>Repeat failed action (sample)</button>
+            </div>
+            <label for="clipboard-input">Clipboard on fresh summon</label>
+            <select id="clipboard-input">
+              <option value="text">Sample text</option>
+              <option value="empty">Empty</option>
+              <option value="nontext">Non-text</option>
+              <option value="failure">Read failure</option>
+            </select>
+            <label for="hotkey-scenario">Desktop shortcut state</label>
+            <select id="hotkey-scenario">
+              <option value="x11">X11 bound</option>
+              <option value="x11-different">X11 effective differs</option>
+              <option value="wayland">Wayland desktop wording</option>
+              <option value="wayland-unknown">Wayland no description</option>
+              <option value="not-requested">Not requested</option>
+              <option value="retained">Refused; old binding retained</option>
+              <option value="unavailable">Mechanism unavailable</option>
+              <option value="refused">Refused; try another key</option>
+              <option value="revoked">Revoked; rebind</option>
+            </select>
+            <label for="key-source-scenario">API key source</label>
+            <select id="key-source-scenario">
+              <option>None</option>
+              <option>System keyring</option>
+              <option>Environment</option>
+              <option>Config file</option>
+            </select>
+            <div class="scenario-actions">
+              <button id="external-config" class="secondary">External config edit</button>
+              <button id="custom-config" class="secondary">Custom provider / log size</button>
+            </div>
+            <h3>Sample window actions</h3>
+            <div class="scenario-actions">
+              <button data-window="summon" class="secondary">Summon / toggle</button>
+              <button data-window="tray" class="secondary">Tray open</button>
+              <button data-window="focusLost" class="secondary">Focus loss</button>
+              <button data-window="iconified" class="secondary">Minimize</button>
+              <button data-window="restore" class="secondary">Restore</button>
+              <button data-window="dismissed" class="secondary">Dismiss</button>
+              <button data-window="close" class="secondary">Native close</button>
+              <button data-window="reset" class="secondary">Reset sample</button>
+            </div>
+          </div>
+        </details>
+        <details class="scenario-details">
+          <summary>Simulated effects</summary>
+          <p id="window-status"></p>
+          <p id="sample-effects">No sample history yet.</p>
+          <p id="committed-status"></p>
+          <h3>Sample clipboard</h3>
+          <pre id="clipboard-output">Nothing copied.</pre>
+        </details>
+        <p class="simulation-note">
+          Use dummy API keys only. No real provider, clipboard, configuration file or history database is accessed. Reload resets this sample.
+        </p>
+      </aside>
+    </main>
+  </body>
+</html>

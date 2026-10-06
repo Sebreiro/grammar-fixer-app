@@ -85,6 +85,7 @@ void main() {
     'CAP-8: the log size saves through settings and reflects config edits',
     (tester) async {
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'Advanced');
       final choice = find.byType(DropdownButton<int>);
       await tester.ensureVisible(choice);
       await tester.tap(choice);
@@ -105,6 +106,7 @@ void main() {
     'CAP-8: a failed log size write keeps the saved limit and reports failure',
     (tester) async {
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'Advanced');
       harness.configStore.writeError = StateError('disk refused the write');
       final choice = find.byType(DropdownButton<int>);
       await tester.ensureVisible(choice);
@@ -198,6 +200,7 @@ void main() {
     var source = 'Config file';
     harness.settings.attachApiKeySourceLabel((_) async => source);
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'AI');
     await tester.pumpAndSettle();
 
     expect(find.text('API key source: Config file'), findsOneWidget);
@@ -230,6 +233,7 @@ void main() {
       return lookup.future;
     });
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'AI');
     expect(labels, hasLength(1));
 
     await harness.configStore.write(
@@ -262,6 +266,7 @@ void main() {
     final label = Completer<String>();
     harness.settings.attachApiKeySourceLabel((_) => label.future);
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'AI');
 
     await tester.pumpWidget(const SizedBox.shrink());
     label.complete('System keyring');
@@ -275,6 +280,7 @@ void main() {
     final logger = ThrowingLogger();
     replaceHarness(SettingsHarness(installedLogger: logger));
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'AI');
 
     unawaited(harness.settings.dispose());
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
@@ -293,6 +299,7 @@ void main() {
   /// hits nothing and the row goes on to assert against a mutation that never
   /// happened.
   Future<void> pick(WidgetTester tester, String presetId) async {
+    await harness.selectCategory(tester, 'AI');
     if (optionFor(presetId).evaluate().isEmpty) {
       final preset = harness.configStore.current.presets.firstWhere(
         (preset) => preset.id == presetId,
@@ -344,6 +351,7 @@ void main() {
     'A15 CAP-8: selected-provider options name their provider and model',
     (tester) async {
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'AI');
 
       for (final preset in SettingsHarness.defaultConfig.presets) {
         if (preset.providerId != harness.state.activePreset?.providerId) {
@@ -365,6 +373,7 @@ void main() {
   testWidgets('A16 CAP-8: the screen states that the next correction uses the '
       'selected preset', (tester) async {
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'AI');
 
     await pick(tester, SettingsHarness.localPreset.id);
 
@@ -385,6 +394,7 @@ void main() {
       'sentence and keeps showing the store\'s current value', (tester) async {
     harness.configStore.writeError = StateError('the config file is read-only');
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'AI');
 
     await pick(tester, SettingsHarness.fastPreset.id);
 
@@ -475,7 +485,9 @@ void main() {
           'a real bind can sit on a portal dialog for seconds (AD-11), and two '
           'overlapping mutations resolve last-completion-wins',
     );
+    await harness.selectCategory(tester, 'AI');
     expect(tester.widget<ListTile>(presetOption).enabled, isFalse);
+    await harness.selectCategory(tester, 'General');
     // D-16, and re-pointed from the toggles and the key field D-14 removed:
     // the capture surface is read-only while a bind is in flight, so it offers
     // no tap that would start a capture at all.
@@ -497,6 +509,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.widget<ElevatedButton>(applyButton).enabled, isTrue);
+    await harness.selectCategory(tester, 'AI');
     expect(tester.widget<ListTile>(presetOption).enabled, isTrue);
   });
 
@@ -506,8 +519,9 @@ void main() {
     await harness.pumpSettings(tester);
 
     await pick(tester, SettingsHarness.fastPreset.id);
-
+    await harness.selectCategory(tester, 'General');
     expect(tester.widget<ElevatedButton>(applyButton).enabled, isTrue);
+    await harness.selectCategory(tester, 'AI');
     expect(tester.widget<ListTile>(presetOption).enabled, isTrue);
   });
 
@@ -520,6 +534,7 @@ void main() {
     final disk = Completer<void>();
     harness.configStore.writeGate = disk;
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'AI');
 
     await tester.ensureVisible(optionFor(SettingsHarness.fastPreset.id));
     await tester.pumpAndSettle();
@@ -568,6 +583,7 @@ void main() {
     useCompatiblePreset();
     harness.configStore.writeError = StateError('the config file is read-only');
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'AI');
     await pick(tester, SettingsHarness.fastPreset.id);
     expect(find.byType(SettingsFailureNotice), findsOneWidget);
 
@@ -601,6 +617,7 @@ void main() {
       harness.configStore.current.copyWith(activePresetId: compatiblePreset.id),
     );
     await tester.pumpAndSettle();
+    await harness.selectCategory(tester, 'AI');
     await tester.enterText(baseUrlField, 'https://draft.example/v1');
     final baseUrl =
         tester.widget<TextField>(baseUrlField).controller ??
@@ -692,6 +709,7 @@ void main() {
       're-seeds the field the user is not editing', (tester) async {
     useCompatiblePreset();
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'AI');
     await tester.enterText(baseUrlField, 'https://draft.example/v1');
     await tester.enterText(modelField, 'draft-model');
     final baseUrl =
@@ -716,7 +734,9 @@ void main() {
     // Re-pointed from the key field and its toggles: one string now carries
     // what three controls used to, and the claim is the same — the stored
     // preference is the truth and the control follows it.
+    await harness.selectCategory(tester, 'General');
     expect(find.text('Alt+F12'), findsOneWidget);
+    await harness.selectCategory(tester, 'AI');
     expect(find.text('Ctrl+Shift+G'), findsNothing);
     expect(baseUrl.text, 'https://draft.example/v1');
     expect(model.text, 'draft-model');
@@ -773,6 +793,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await harness.selectCategory(tester, 'AI');
     await tester.enterText(baseUrlField, 'https://draft.example/v1');
     await tester.enterText(modelField, 'draft-model');
     await pick(tester, secondPreset.id);
@@ -790,7 +811,7 @@ void main() {
     await harness.openSettings(tester);
     expect(
       tester.widget<TextField>(baseUrlField).controller?.text,
-      'https://old.example/v1',
+      'https://draft.example/v1',
     );
     expect(
       tester.widget<TextField>(modelField).controller?.text,
@@ -900,6 +921,7 @@ void main() {
       'fail for a change nobody made', (tester) async {
     harness.configStore.writeError = StateError('the config file is read-only');
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'AI');
 
     await tester.tap(
       optionFor(SettingsHarness.defaultPreset.id),

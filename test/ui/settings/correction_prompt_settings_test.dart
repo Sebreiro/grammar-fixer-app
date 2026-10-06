@@ -57,6 +57,7 @@ void main() {
     'CAP-8: Settings displays and saves the active correction prompt',
     (tester) async {
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'Advanced');
       expect(draft(tester), SettingsHarness.defaultPreset.systemPrompt);
       const prompt = 'Correct grammar.\nPreserve my intent.\n';
       await edit(tester, prompt);
@@ -78,6 +79,7 @@ void main() {
     tester,
   ) async {
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'Advanced');
     await harness.configStore.write(withPrompt('Changed in config.'));
     await tester.pumpAndSettle();
     expect(draft(tester), 'Changed in config.');
@@ -88,6 +90,7 @@ void main() {
     'CAP-8: conflicting config edits preserve the draft with a notice',
     (tester) async {
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'Advanced');
       await edit(tester, 'Unsaved draft.');
       await harness.configStore.write(withPrompt('External edit.'));
       await tester.pumpAndSettle();
@@ -112,11 +115,14 @@ void main() {
     tester,
   ) async {
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'Advanced');
     await edit(tester, 'Unsaved old preset prompt.');
+    await harness.selectCategory(tester, 'AI');
     final option = find.widgetWithText(ListTile, SettingsHarness.fastPreset.id);
     await tester.ensureVisible(option);
     await tester.tap(option);
     await tester.pumpAndSettle();
+    await harness.selectCategory(tester, 'Advanced');
     expect(draft(tester), SettingsHarness.fastPreset.systemPrompt);
     expect(
       harness.configStore.current.presets.first,
@@ -128,6 +134,7 @@ void main() {
     'CAP-8: a failed prompt save leaves a draft that can be retried',
     (tester) async {
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'Advanced');
       harness.configStore.writeError = StateError('disk unavailable');
       await edit(tester, 'Retry this prompt.');
       await save(tester);
@@ -149,6 +156,7 @@ void main() {
 
   testWidgets('CAP-8: blank prompts cannot be saved', (tester) async {
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'Advanced');
     await edit(tester, ' \n\t');
     expect(tester.widget<FilledButton>(saveButton).onPressed, isNull);
     expect(
@@ -162,6 +170,7 @@ void main() {
     tester,
   ) async {
     await harness.pumpSettings(tester);
+    await harness.selectCategory(tester, 'Advanced');
     final gate = Completer<void>();
     harness.configStore.writeGate = gate;
     await edit(tester, 'A pending prompt.');

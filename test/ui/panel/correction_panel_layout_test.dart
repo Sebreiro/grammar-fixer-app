@@ -16,6 +16,51 @@ import '../panel_harness.dart';
 /// say is how the panel looks at the window's real size: this container has no
 /// display, so the surface here is a choice of the test's, not an observation.
 void main() {
+  for (final size in const [
+    Size(840, 650),
+    Size(640, 520),
+    Size(480, 360),
+    Size(320, 520),
+    Size(1100, 700),
+  ]) {
+    for (final brightness in Brightness.values) {
+      for (final scale in [1.0, 1.5, 2.0]) {
+        testWidgets(
+          'CAP-3/10/11: panel ${size.width}x${size.height} $brightness ${scale}x retains exact Copy',
+          (tester) async {
+            final matrixHarness = PanelHarness();
+            addTearDown(matrixHarness.dispose);
+            tester.view.physicalSize = size;
+            tester.view.devicePixelRatio = 1;
+            tester.platformDispatcher.platformBrightnessTestValue = brightness;
+            tester.platformDispatcher.textScaleFactorTestValue = scale;
+            addTearDown(tester.view.reset);
+            addTearDown(tester.platformDispatcher.clearAllTestValues);
+            await matrixHarness.pumpSession(tester);
+            final correct = find.widgetWithText(ElevatedButton, 'Correct');
+            await tester.ensureVisible(correct);
+            await tester.tap(correct);
+            await tester.pump();
+            await matrixHarness.completeRun(
+              tester,
+              List.filled(12, 'Exact text with newlines.\n').join(),
+            );
+            final copy = find.byTooltip('Copy the Corrected suggestion');
+            await tester.ensureVisible(copy);
+            await tester.tap(copy);
+            await tester.pump();
+            await tester.pump();
+            expect(
+              matrixHarness.clipboard.writes.single,
+              matrixHarness.state.suggestionTexts[SuggestionRegister.formal],
+            );
+            expect(matrixHarness.panelVisibility.isVisible, isTrue);
+            expect(tester.takeException(), isNull);
+          },
+        );
+      }
+    }
+  }
   late PanelHarness harness;
 
   setUp(() => harness = PanelHarness());
@@ -59,6 +104,7 @@ void main() {
 
     harness.clipboard.text = longOriginal;
     await harness.pumpSession(tester);
+    await tester.ensureVisible(find.byType(ElevatedButton));
     await tester.tap(find.byType(ElevatedButton));
     await tester.pump();
     await harness.completeRun(tester, longVariant);
@@ -146,6 +192,7 @@ void main() {
 
       harness.clipboard.text = 'i has went';
       await harness.pumpSession(tester);
+      await tester.ensureVisible(find.byType(ElevatedButton));
       await tester.tap(find.byType(ElevatedButton));
       await tester.pump();
       await harness.completeRun(tester);
@@ -159,7 +206,7 @@ void main() {
                 widget is SuggestionCard &&
                 widget.register == SuggestionRegister.values.first,
           ),
-          matching: find.byType(IconButton),
+          matching: find.widgetWithText(TextButton, "Copy"),
         ),
       );
       await tester.pump();
@@ -195,6 +242,7 @@ void main() {
 
     harness.clipboard.text = 'i has went';
     await harness.pumpSession(tester);
+    await tester.ensureVisible(find.byType(ElevatedButton));
     await tester.tap(find.byType(ElevatedButton));
     await tester.pump();
     await harness.completeRun(tester);
@@ -229,6 +277,7 @@ void main() {
     final longVariant = longText('I have gone to the store and bought it');
     harness.clipboard.text = longText('i has went to the store and buyed it');
     await harness.pumpSession(tester);
+    await tester.ensureVisible(find.byType(ElevatedButton));
     await tester.tap(find.byType(ElevatedButton));
     await tester.pump();
     await harness.completeRun(tester, longVariant);
@@ -281,6 +330,7 @@ void main() {
 
     harness.clipboard.text = 'i has went';
     await harness.pumpSession(tester);
+    await tester.ensureVisible(find.byType(ElevatedButton));
     await tester.tap(find.byType(ElevatedButton));
     await tester.pump();
     await harness.completeRun(tester);
@@ -296,7 +346,7 @@ void main() {
       of: find.byWidgetPredicate(
         (widget) => widget is SuggestionCard && widget.register == first,
       ),
-      matching: find.byType(IconButton),
+      matching: find.widgetWithText(TextButton, "Copy"),
     );
     final copyRect = tester.getRect(copy);
     expect(copyRect.right, lessThanOrEqualTo(surface.width));
@@ -326,6 +376,7 @@ void main() {
 
     harness.clipboard.text = 'i has went';
     await harness.pumpSession(tester);
+    await tester.ensureVisible(find.byType(ElevatedButton));
     await tester.tap(find.byType(ElevatedButton));
     await tester.pump();
     await harness.completeRun(tester);
@@ -338,7 +389,7 @@ void main() {
         of: find.byWidgetPredicate(
           (widget) => widget is SuggestionCard && widget.register == first,
         ),
-        matching: find.byType(IconButton),
+        matching: find.widgetWithText(TextButton, "Copy"),
       ),
     );
     await tester.pump();
@@ -374,6 +425,7 @@ void main() {
 
     harness.clipboard.text = longText('i has went to the store and buyed it');
     await harness.pumpSession(tester);
+    await tester.ensureVisible(find.byType(ElevatedButton));
     await tester.tap(find.byType(ElevatedButton));
     await tester.pump();
     await harness.completeRun(
@@ -414,6 +466,7 @@ void main() {
 
     harness.clipboard.text = 'i has went';
     await harness.pumpSession(tester);
+    await tester.ensureVisible(find.byType(ElevatedButton));
     await tester.tap(find.byType(ElevatedButton));
     await tester.pump();
     await harness.completeRun(tester, longText('I have gone to the store'));
@@ -450,6 +503,7 @@ void main() {
 
     harness.clipboard.text = 'i has went';
     await harness.pumpSession(tester);
+    await tester.ensureVisible(find.byType(ElevatedButton));
     await tester.tap(find.byType(ElevatedButton));
     await tester.pump();
     harness.run.emit(

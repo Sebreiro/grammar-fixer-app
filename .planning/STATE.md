@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 milestone: v1.0
 status: Awaiting next milestone
 stopped_at: Phase 02 complete — all phases complete
-last_updated: "2026-10-02T19:08:31.427Z"
-last_activity: 2026-10-02
-last_activity_desc: "Completed quick task 261002-gk8: Select and copy correction and error text with mouse, keyboard, and right-click"
-state_head: 902a7cd5c7d8792b737ec191c2286efe145da4f6
+last_updated: "2026-10-05T10:54:33.080Z"
+last_activity: 2026-10-05
+last_activity_desc: "Completed quick task 261005-2g5: Apply focused prototype to Flutter with stacked suggestions and categorized Settings"
+state_head: 4d97b45d3d13d6acb617a947ec3859d4d0fa0305
 progress:
   total_phases: 2
   completed_phases: 2
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-26 after v1.0)
 Phase: Milestone v1.0 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-02 - Completed quick task 261002-gk8: Select and copy correction and error text with mouse, keyboard, and right-click
+Last activity: 2026-10-05 - Completed quick task 261005-2g5: Apply focused prototype to Flutter with stacked suggestions and categorized Settings
 
 ## Performance Metrics
 
@@ -252,6 +252,10 @@ None yet.
 | 261002-cgz | First suggestion preserves wording with grammar and native phrasing fixes; second Casual; third Short | 2026-10-02 | 80efc0c | Needs Review | [261002-cgz-make-the-first-correction-preserve-wordi](./quick/261002-cgz-make-the-first-correction-preserve-wordi/) |
 | 261002-cdz | Keep correction panel above windows on KDE Wayland; preserve taskbar and rebuild verified local AppImage | 2026-10-02 | 36d91b9 | Needs Review | [261002-cdz-keep-the-correction-panel-above-other-wi](./quick/261002-cdz-keep-the-correction-panel-above-other-wi/) |
 | 261002-gk8 | Select and copy correction and error text with mouse, keyboard, and right-click | 2026-10-02 | 902a7cd | Verified | [261002-gk8-select-and-copy-correction-and-error-tex](./quick/261002-gk8-select-and-copy-correction-and-error-tex/) |
+| 261002-ka3 | Create interactive HTML/CSS baseline and UI/UX reference for panel and settings | 2026-10-02 | 8b803f2 | Verified | [261002-ka3-create-an-html-css-prototype-and-ui-ux-r](./quick/261002-ka3-create-an-html-css-prototype-and-ui-ux-r/) |
+| 261003-7im | Improve the HTML prototype with the focused command panel design brief | 2026-10-03 | 9c40d88 | Verified | [261003-7im-improve-the-html-prototype-with-the-focu](./quick/261003-7im-improve-the-html-prototype-with-the-focu/) |
+| 261003-om4 | Make the HTML main panel compact with stacked suggestion rows while preserving Settings | 2026-10-03 | 3f7fcba | Verified | [261003-om4-make-the-html-main-panel-compact-with-st](./quick/261003-om4-make-the-html-main-panel-compact-with-st/) |
+| 261005-2g5 | Apply focused prototype to Flutter with stacked suggestions and categorized Settings | 2026-10-05 | 4d97b45 | Needs Review | [261005-2g5-apply-design-prototype-prototype-ui-base](./quick/261005-2g5-apply-design-prototype-prototype-ui-base/) |
 
 ### Roadmap Evolution
 

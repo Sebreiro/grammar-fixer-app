@@ -11,9 +11,12 @@ import 'package:hotkey_grammar_corrector/src/domain/correction/preset.dart';
 import 'package:hotkey_grammar_corrector/src/domain/correction/suggestion.dart';
 import 'package:hotkey_grammar_corrector/src/domain/correction/suggestion_register.dart';
 import 'package:hotkey_grammar_corrector/src/domain/logger.dart';
+import 'package:hotkey_grammar_corrector/src/infrastructure/hotkey/hotkey_key_catalogue.dart';
 import 'package:hotkey_grammar_corrector/src/ui/daemon_app.dart';
 
 import '../fakes/fake_clipboard_port.dart';
+import '../fakes/fake_config_store.dart';
+import 'settings_harness.dart';
 import '../fakes/fake_clock.dart';
 import '../fakes/fake_correction_provider.dart';
 import '../fakes/fake_correction_repository.dart';
@@ -59,9 +62,8 @@ final class PanelHarness {
   final FakePanelVisibility panelVisibility = FakePanelVisibility();
   final FakeGlobalHotkey hotkey = FakeGlobalHotkey();
 
-  /// The eight seams the pumped tree reads. `configStore` and `tray` belong to
-  /// controllers nothing here constructs, and are deliberately left throwing: an
-  /// override the tree does not need would hide a widget that reached for one.
+  /// The root also creates the retained Settings draft owner, so config uses
+  /// its fake even while the panel is visible. Tray remains outside this tree.
   ///
   /// `globalHotkey` used to be the third of those and is not any more. `DaemonApp`
   /// is what this harness pumps, and its home now watches
@@ -72,6 +74,12 @@ final class PanelHarness {
   /// convenient.
   late final ProviderContainer container = ProviderContainer.test(
     overrides: [
+      registrableKeysProvider.overrideWithValue(
+        HotkeyKeyCatalogue.registrableKeys(),
+      ),
+      configStoreProvider.overrideWithValue(
+        FakeConfigStore(current: SettingsHarness.defaultConfig),
+      ),
       loggerProvider.overrideWithValue(installedLogger ?? logger),
       clockProvider.overrideWithValue(clock),
       clipboardProvider.overrideWithValue(clipboard),

@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "checks": [
+    "Custom log size stays in numerical order",
+    "Custom provider disappears after reset with the initial provider restored",
+    "Settings failure is announced and fixture replay stays outside the app",
+    "Failed settings change recovers by repeating its original control",
+    "Correct action is aligned with the right edge of the editor",
+    "Correction failure updates its persistent announcement without focus movement"
+  ],
+  "errors": [],
+  "outgoingRequests": []
+}

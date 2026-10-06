@@ -1,21 +1,11 @@
 import 'package:flutter/material.dart';
-
 import '../../domain/correction/suggestion_register.dart';
+import '../daemon_theme.dart';
 import 'register_key_slot.dart';
+import 'suggestion_expansion.dart';
 
-/// One register variant: its selecting key, its label, its text, and its own
-/// copy button (CAP-4, CAP-11).
-///
-/// Both the key hint and the label are *derived* from the enum — the hint from
-/// `SuggestionRegister.values.indexOf(register) + 1` (AD-6) and the label from
-/// `register.label` — so reordering or relabeling a register cannot leave this
-/// card claiming the wrong key or the wrong name.
-///
-/// The card is also where "is this variant actionable" is decided, once, from
-/// [completed] and its own [text]: the copy button and the key hint must agree,
-/// and a hint that promises a key the controller will ignore is the same broken
-/// affordance DW-3 was filed about.
-class SuggestionCard extends StatelessWidget {
+/// Compact preview; the complete authoritative string remains available to copy.
+class SuggestionCard extends StatefulWidget {
   const SuggestionCard({
     required this.register,
     required this.text,
@@ -28,160 +18,257 @@ class SuggestionCard extends StatelessWidget {
     this.copyFailure,
     super.key,
   });
-
   final SuggestionRegister register;
-
-  /// Whatever the controller currently holds for [register]: the accumulated
-  /// deltas while the correction runs (CAP-5), the authoritative completed text
-  /// once it has (AD-3).
   final String text;
-
-  /// AD-18's highlight. Selecting never copies, so this changes nothing but
-  /// the card's appearance.
   final bool selected;
-
-  /// Whether the session's answer is the authoritative one (AD-3). False while
-  /// deltas are still arriving, when nothing on this card is actionable.
   final bool completed;
-
   final VoidCallback onSelect;
   final VoidCallback onCopy;
   final bool copyPending;
   final bool copySucceeded;
   final String? copyFailure;
-
-  /// Whether this variant can be copied and selected at all.
-  ///
-  /// The same test the controller applies (`trim()`, not `isEmpty`): a variant
-  /// that came back as spaces is not something to put over the user's clipboard
-  /// and not something to highlight, so it must not look as though it were.
   bool get actionable => completed && text.trim().isNotEmpty;
-
-  /// The 1/2/3 key that selects this card, or null past the digit row.
-  ///
-  /// Shares one derivation with the activator the panel listens for, so the
-  /// hint cannot promise a key that selects another row (AD-6).
   String? get keyHint =>
       keySlotHintForIndex(SuggestionRegister.values.indexOf(register));
+  @override
+  State<SuggestionCard> createState() => _SuggestionCardState();
+}
+
+class _SuggestionCardState extends State<SuggestionCard> {
+  final _overlay = OverlayPortalController();
+  final _triggerFocus = FocusNode();
+  final _expansionFocus = FocusNode();
+  @override
+  void didUpdateWidget(SuggestionCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_overlay.isShowing &&
+        (oldWidget.text != widget.text || !widget.actionable)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _overlay.hide();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _triggerFocus.dispose();
+    _expansionFocus.dispose();
+    super.dispose();
+  }
+
+  void _close() {
+    _overlay.hide();
+    _triggerFocus.requestFocus();
+  }
+
+  void _open() {
+    _overlay.show();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _expansionFocus.requestFocus();
+    });
+  }
+
+  void _copyExpanded() {
+    widget.onCopy();
+    _expansionFocus.requestFocus();
+  }
+
+  String get _copyLabel => widget.copyPending
+      ? 'Copying…'
+      : widget.copySucceeded
+      ? 'Copied'
+      : 'Copy';
+
+  String? get _copyFailureText => switch (widget.copyFailure) {
+    null => null,
+    'There is no suggestion text to copy.' => widget.copyFailure,
+    _ => "Couldn't copy this suggestion. Try again.",
+  };
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final hint = keyHint;
-    final copyStatusText = copyPending
-        ? 'Copying…'
-        : copySucceeded
-        ? 'Copied'
-        : copyFailure == null
-        ? null
-        : copyFailure == 'There is no suggestion text to copy.'
-        ? copyFailure
-        : "Couldn't copy this suggestion. Try again.";
-    return Semantics(
-      container: true,
-      selected: selected,
-      label: '${register.label} suggestion',
-      child: Card(
-        color: selected ? theme.colorScheme.primaryContainer : null,
-        child: InkWell(
-          onTap: actionable && !selected ? onSelect : null,
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    if (hint != null)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Text(
-                          hint,
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            // Dimmed while the key would do nothing, the way the
-                            // copy button beside it is disabled: the hint is a
-                            // promise about a keystroke and must not outlive it.
-                            color: actionable
-                                ? theme.colorScheme.onSurface
-                                : theme.disabledColor,
+    final scheme = theme.colorScheme;
+    final label = widget.register.label;
+    final style = theme.textTheme.bodyMedium ?? const TextStyle(fontSize: 13);
+    final failure = _copyFailureText;
+    return OverlayPortal(
+      controller: _overlay,
+      overlayChildBuilder: (context) => SuggestionExpansion(
+        label: label,
+        text: widget.text,
+        focusNode: _expansionFocus,
+        onClose: _close,
+        onCopy: widget.copyPending ? null : _copyExpanded,
+        copyLabel: _copyLabel,
+        copyFailure: failure,
+      ),
+      child: Semantics(
+        container: true,
+        selected: widget.selected,
+        label: '$label suggestion',
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Material(
+            color: widget.selected
+                ? scheme.primaryContainer
+                : scheme.surfaceContainer,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6),
+              side: BorderSide(
+                color: widget.selected ? scheme.primary : scheme.outline,
+              ),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: widget.actionable && !widget.selected
+                  ? widget.onSelect
+                  : null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final scale = MediaQuery.textScalerOf(context);
+                    final narrow =
+                        constraints.maxWidth <= 460 || scale.scale(13) > 19;
+                    final tiny = constraints.maxWidth < 220;
+                    final previewWidth = tiny
+                        ? constraints.maxWidth
+                        : (constraints.maxWidth - (narrow ? 100 : 210)).clamp(
+                            1.0,
+                            double.infinity,
+                          );
+                    final painter = TextPainter(
+                      text: TextSpan(text: widget.text, style: style),
+                      textDirection: Directionality.of(context),
+                      textScaler: scale,
+                      maxLines: 5,
+                    )..layout(maxWidth: previewWidth);
+                    final overflow = painter.didExceedMaxLines;
+                    painter.dispose();
+                    final heading = Wrap(
+                      spacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (widget.keyHint case final hint?)
+                          Text(
+                            hint,
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: widget.actionable
+                                  ? scheme.onSurface
+                                  : theme.disabledColor,
+                            ),
                           ),
-                        ),
-                      ),
-                    // Flexible, not bare: nothing sizes the window or sets a
-                    // minimum width for it either, so a narrow drag has to
-                    // ellipsise the label rather than overflow the row and clip the
-                    // copy button out of reach.
-                    Flexible(
-                      child: Text(
-                        register.label,
-                        style: theme.textTheme.labelMedium,
-                        overflow: TextOverflow.ellipsis,
-                        softWrap: false,
-                      ),
-                    ),
-                    if (selected)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: Icon(
-                          Icons.check,
-                          size: 18,
-                          semanticLabel: '${register.label} selected',
-                        ),
-                      ),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: actionable ? onCopy : null,
-                      // Named, because three visually identical buttons are
-                      // indistinguishable to a screen reader — and CAP-11 is
-                      // "each suggestion has its own button".
-                      tooltip: 'Copy the ${register.label} suggestion',
-                      icon: const Icon(Icons.copy, size: 18),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ],
-                ),
-                if (copyStatusText != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Semantics(
-                      liveRegion: true,
-                      label: '${register.label} suggestion $copyStatusText',
-                      child: Row(
-                        children: [
-                          if (copyPending)
-                            const Padding(
-                              padding: EdgeInsets.only(right: 4),
-                              child: SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                        Text(label, style: theme.textTheme.labelMedium),
+                        if (widget.selected)
+                          Icon(
+                            Icons.check,
+                            size: 14,
+                            semanticLabel: '$label selected',
+                          ),
+                      ],
+                    );
+                    final preview = widget.actionable
+                        ? SelectableText(
+                            widget.text,
+                            maxLines: overflow ? 5 : null,
+                            style: style,
+                            onTap: widget.selected ? null : widget.onSelect,
+                          )
+                        : Text(
+                            widget.text,
+                            maxLines: 5,
+                            overflow: TextOverflow.ellipsis,
+                            style: style,
+                          );
+                    final actions = Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Tooltip(
+                          message: 'Copy the $label suggestion',
+                          child: Semantics(
+                            liveRegion: true,
+                            label: '$label suggestion $_copyLabel',
+                            tooltip: 'Copy the $label suggestion',
+                            child: TextButton.icon(
+                              style: TextButton.styleFrom(
+                                foregroundColor: scheme.onSurface,
+                                side: BorderSide(color: scheme.outline),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
                                 ),
                               ),
+                              onPressed:
+                                  widget.actionable && !widget.copyPending
+                                  ? widget.onCopy
+                                  : null,
+                              icon: const Icon(Icons.copy_outlined, size: 14),
+                              label: Text(
+                                _copyLabel,
+                                style: widget.copySucceeded
+                                    ? TextStyle(
+                                        color: DaemonTheme.successFor(
+                                          theme.brightness,
+                                        ),
+                                      )
+                                    : null,
+                              ),
                             ),
-                          Flexible(
-                            child: copyFailure == null
-                                ? Text(
-                                    copyStatusText,
-                                    style: theme.textTheme.bodySmall,
-                                  )
-                                : SelectableText(
-                                    copyStatusText,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme.error,
-                                    ),
-                                  ),
                           ),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (actionable)
-                  SelectableText(text, onTap: selected ? null : onSelect)
-                else
-                  // A streamed partial is not the authoritative correction.
-                  Text(text),
-              ],
+                        ),
+                        if (widget.actionable && overflow)
+                          TextButton(
+                            focusNode: _triggerFocus,
+                            onPressed: _open,
+                            child: const Text('Show more'),
+                          ),
+                      ],
+                    );
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (tiny) ...[
+                          heading,
+                          actions,
+                          preview,
+                        ] else
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (!narrow) SizedBox(width: 110, child: heading),
+                              Expanded(
+                                child: narrow
+                                    ? Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          heading,
+                                          const SizedBox(height: 4),
+                                          preview,
+                                        ],
+                                      )
+                                    : preview,
+                              ),
+                              const SizedBox(width: 6),
+                              SizedBox(width: 94, child: actions),
+                            ],
+                          ),
+                        if (failure != null)
+                          Semantics(
+                            liveRegion: true,
+                            child: SelectableText(
+                              failure,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.error,
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
             ),
           ),
         ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'daemon_home.dart';
+import 'daemon_theme.dart';
 
 /// The root widget of a daemon whose window is only mapped by the hotkey
 /// toggle (AD-8).
@@ -25,17 +26,10 @@ class DaemonApp extends StatelessWidget {
       // painted across its corner would ship in the debug artifact the build
       // gate produces and cover part of a variant.
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-      ),
+      theme: DaemonTheme.light,
       // A panel summoned over whatever the user is writing in has no business
       // being the one bright window on a dark desktop.
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.indigo,
-          brightness: Brightness.dark,
-        ),
-      ),
+      darkTheme: DaemonTheme.dark,
       themeMode: ThemeMode.system,
       home: const DaemonHome(),
     );

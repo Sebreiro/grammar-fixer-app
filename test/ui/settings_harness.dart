@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/material.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +19,7 @@ import 'package:hotkey_grammar_corrector/src/ui/daemon_app.dart';
 import '../fakes/fake_clipboard_port.dart';
 import '../fakes/fake_clock.dart';
 import '../fakes/fake_config_store.dart';
+import 'package:hotkey_grammar_corrector/src/ui/settings/settings_category.dart';
 import '../fakes/fake_correction_provider.dart';
 import '../fakes/fake_correction_repository.dart';
 import '../fakes/fake_global_hotkey.dart';
@@ -162,6 +164,24 @@ final class SettingsHarness {
   Future<void> openSettings(WidgetTester tester) async {
     await tester.tap(affordance);
     await tester.pump();
+  }
+
+  Future<void> selectCategory(WidgetTester tester, String label) async {
+    final selector = find.byWidgetPredicate(
+      (widget) =>
+          widget is DropdownButtonFormField<SettingsCategory> &&
+          widget.decoration.labelText == 'Settings category',
+    );
+    if (selector.evaluate().isNotEmpty) {
+      await tester.tap(selector);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text(label).last);
+    } else {
+      await tester.tap(find.widgetWithText(ListTile, label));
+    }
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
   }
 
   /// The one finder for the way in, so no test re-derives it.

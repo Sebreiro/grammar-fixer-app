@@ -27,8 +27,10 @@ void main() {
     (widget) => widget is SuggestionCard && widget.register == register,
   );
 
-  Finder copyButtonOf(SuggestionRegister register) =>
-      find.descendant(of: cardOf(register), matching: find.byType(IconButton));
+  Finder copyButtonOf(SuggestionRegister register) => find.descendant(
+    of: cardOf(register),
+    matching: find.widgetWithText(TextButton, "Copy"),
+  );
 
   SuggestionCard card(WidgetTester tester, SuggestionRegister register) =>
       tester.widget<SuggestionCard>(cardOf(register));
@@ -131,14 +133,16 @@ void main() {
     for (final register in SuggestionRegister.values) {
       expect(
         tester
-            .widget<Card>(
-              find.descendant(
-                of: cardOf(register),
-                matching: find.byType(Card),
-              ),
+            .widget<Material>(
+              find
+                  .descendant(
+                    of: cardOf(register),
+                    matching: find.byType(Material),
+                  )
+                  .first,
             )
             .color,
-        isNull,
+        equals(theme.colorScheme.surfaceContainer),
         reason: 'nothing is highlighted before a digit is pressed',
       );
     }
@@ -147,8 +151,10 @@ void main() {
 
     expect(
       tester
-          .widget<Card>(
-            find.descendant(of: cardOf(chosen), matching: find.byType(Card)),
+          .widget<Material>(
+            find
+                .descendant(of: cardOf(chosen), matching: find.byType(Material))
+                .first,
           )
           .color,
       equals(theme.colorScheme.primaryContainer),
@@ -157,11 +163,16 @@ void main() {
     for (final other in SuggestionRegister.values.where((r) => r != chosen)) {
       expect(
         tester
-            .widget<Card>(
-              find.descendant(of: cardOf(other), matching: find.byType(Card)),
+            .widget<Material>(
+              find
+                  .descendant(
+                    of: cardOf(other),
+                    matching: find.byType(Material),
+                  )
+                  .first,
             )
             .color,
-        isNull,
+        equals(theme.colorScheme.surfaceContainer),
       );
     }
   });
@@ -240,7 +251,7 @@ void main() {
     await tester.pump();
 
     expect(
-      tester.widget<IconButton>(copyButtonOf(blank)).onPressed,
+      tester.widget<TextButton>(copyButtonOf(blank)).onPressed,
       isNull,
       reason: 'writing spaces over the user\'s clipboard is not a copy',
     );
@@ -302,7 +313,7 @@ void main() {
 
     for (final register in SuggestionRegister.values) {
       expect(
-        tester.widget<IconButton>(copyButtonOf(register)).onPressed,
+        tester.widget<TextButton>(copyButtonOf(register)).onPressed,
         isNull,
         reason: 'a partial is not the record of truth (AD-3)',
       );
@@ -329,13 +340,13 @@ void main() {
 
     expect(
       tester
-          .widget<IconButton>(copyButtonOf(SuggestionRegister.values.first))
+          .widget<TextButton>(copyButtonOf(SuggestionRegister.values.first))
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<IconButton>(copyButtonOf(SuggestionRegister.values.last))
+          .widget<TextButton>(copyButtonOf(SuggestionRegister.values.last))
           .onPressed,
       isNotNull,
     );
@@ -536,7 +547,11 @@ void main() {
 
     for (final register in SuggestionRegister.values) {
       expect(
-        tester.getSemantics(copyButtonOf(register)).tooltip,
+        tester
+            .getSemantics(
+              find.byTooltip("Copy the ${register.label} suggestion"),
+            )
+            .tooltip,
         equals('Copy the ${register.label} suggestion'),
         reason: 'CAP-11 is "each suggestion has its own button"',
       );

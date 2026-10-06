@@ -50,35 +50,16 @@ import 'suggestion_list.dart';
 /// window. Below this content floor the panel scrolls as a whole rather than
 /// clipping its editor, Correct action, or suggestion cards.
 class CorrectionPanel extends ConsumerStatefulWidget {
-  const CorrectionPanel({this.editorTrailingInset = 0, super.key});
+  const CorrectionPanel({this.onSettings, super.key});
 
   /// Horizontal room reserved when Settings shares the editor's top edge.
-  final double editorTrailingInset;
+  final VoidCallback? onSettings;
 
-  /// The smallest height at which CAP-10 actually holds **at text scale 1.0**:
-  /// both panes fit, and the original is *readable* rather than merely present.
-  ///
-  /// Measured, not guessed, and measured against the right claim. "No overflow"
-  /// is reached at 240, but the editor's share there is 7.2 logical pixels — a
-  /// sliver that satisfies "non-zero height" and no reader. The editor gains
-  /// 8 px per 20 px of panel, so a full line of its 16 px text arrives at 300
-  /// (31.2 px). Below the floor the panel scrolls as a whole; at and above it
-  /// the two panes split the surface.
-  ///
-  /// This number alone is not the floor — see [minimumPanelHeightFor].
-  static const double minimumPanelHeight = 300;
+  /// Measured with the compact header and editor action at normal text size.
+  /// Below this floor the whole panel scrolls; above it both panes are readable.
+  static const double minimumPanelHeight = 420;
 
-  /// The floor at [textScaler]: [minimumPanelHeight] grows with the text,
-  /// because everything it was measured against does.
-  ///
-  /// The caption, the button, the card labels and the hints all scale while a
-  /// fixed floor does not, so the editor's share *shrinks* as the text grows:
-  /// probe-measured at 480×300, the editor gets 31.2 px at 1.0×, 23.2 at 1.5×
-  /// and 15.2 at 2.0× — against a line that is 24 px and 32 px tall there. From
-  /// roughly 1.45× up, a constant floor certifies CAP-10 at a height where the
-  /// original cannot show one line, and GNOME's large-text range is 1.25–1.5×.
-  /// Scaling the floor with the text keeps the claim true rather than making
-  /// the number bigger for everyone: 450 at 1.5× leaves the editor 47 px.
+  /// Controls and captions grow together with the reader's text scale.
   static double minimumPanelHeightFor(TextScaler textScaler) =>
       minimumPanelHeight *
       textScaler.scale(_measuredAtFontSize) /
@@ -350,10 +331,69 @@ class _CorrectionPanelState extends ConsumerState<CorrectionPanel> {
             child: SizedBox(
               height: contentHeight,
               child: Padding(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(10),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          if (constraints.maxWidth >= 240) ...[
+                            Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.primaryContainer,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Icon(
+                                Icons.check,
+                                size: 17,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          Expanded(
+                            child: Text(
+                              'Grammar Corrector',
+                              style: Theme.of(context).textTheme.titleMedium,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (widget.onSettings != null)
+                            if (constraints.maxWidth >= 400)
+                              MergeSemantics(
+                                child: Tooltip(
+                                  message: 'Open settings',
+                                  excludeFromSemantics: true,
+                                  child: Semantics(
+                                    tooltip: 'Open settings',
+                                    child: TextButton.icon(
+                                      onPressed: widget.onSettings,
+                                      icon: const Icon(Icons.tune, size: 18),
+                                      label: const Text('Settings'),
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              IconButton(
+                                tooltip: 'Open settings',
+                                onPressed: widget.onSettings,
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(
+                                  Icons.settings_outlined,
+                                  size: 18,
+                                ),
+                              ),
+                        ],
+                      ),
+                    ),
                     // CAP-10: the original and the variants each hold a share
                     // of the surface, so neither scrolls the other out of view.
                     Expanded(
@@ -366,12 +406,7 @@ class _CorrectionPanelState extends ConsumerState<CorrectionPanel> {
                         child: Actions(
                           actions: _correctActions,
                           child: Padding(
-                            // Settings occupies the panel's top-right 48 px;
-                            // reserving a gutter keeps its hit box off the
-                            // outlined editor without reducing pane height.
-                            padding: EdgeInsets.only(
-                              right: widget.editorTrailingInset,
-                            ),
+                            padding: EdgeInsets.zero,
                             child: OriginalTextPane(
                               text: _state.editorText,
                               focusNode: _editorFocus,
@@ -382,7 +417,7 @@ class _CorrectionPanelState extends ConsumerState<CorrectionPanel> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Expanded(
                       flex: 3,
                       child: Shortcuts(
@@ -398,6 +433,28 @@ class _CorrectionPanelState extends ConsumerState<CorrectionPanel> {
                               builder: (context, region) => Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            'Suggestions',
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.labelMedium,
+                                          ),
+                                        ),
+                                        if (_state.status !=
+                                            CorrectionStatus.idle)
+                                          Flexible(
+                                            child: _CorrectionStatusBadge(
+                                              status: _state.status,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
                                   // CAP-5's other half: between the submit and
                                   // the first delta there is nothing to render,
                                   // and a panel that looks idle invites a second
@@ -455,6 +512,43 @@ class _CorrectionPanelState extends ConsumerState<CorrectionPanel> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _CorrectionStatusBadge extends StatelessWidget {
+  const _CorrectionStatusBadge({required this.status});
+
+  final CorrectionStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final failed = status == CorrectionStatus.failed;
+    return Semantics(
+      liveRegion: true,
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: failed ? scheme.errorContainer : scheme.primaryContainer,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            switch (status) {
+              CorrectionStatus.idle => '',
+              CorrectionStatus.running => 'Correcting…',
+              CorrectionStatus.completed => 'Complete',
+              CorrectionStatus.failed => 'Failed',
+            },
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: failed ? scheme.error : scheme.primary,
+            ),
+          ),
+        ),
       ),
     );
   }

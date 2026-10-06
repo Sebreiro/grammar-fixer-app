@@ -6,9 +6,15 @@ class CorrectionPromptField extends StatefulWidget {
     required this.prompt,
     required this.enabled,
     required this.onSave,
+    required this.draft,
+    required this.changedWhileEditing,
+    required this.onChanged,
     super.key,
   });
 
+  final String draft;
+  final bool changedWhileEditing;
+  final ValueChanged<String> onChanged;
   final String prompt;
   final bool enabled;
   final ValueChanged<String> onSave;
@@ -19,22 +25,19 @@ class CorrectionPromptField extends StatefulWidget {
 
 class _CorrectionPromptFieldState extends State<CorrectionPromptField> {
   final _promptController = TextEditingController();
-  bool _changedWhileEditing = false;
 
   @override
   void initState() {
     super.initState();
-    _promptController.text = widget.prompt;
+    _promptController.text = widget.draft;
   }
 
   @override
   void didUpdateWidget(CorrectionPromptField oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.prompt == widget.prompt) return;
-    if (_promptController.text == oldWidget.prompt) {
-      _promptController.text = widget.prompt;
+    if (_promptController.text != widget.draft) {
+      _promptController.text = widget.draft;
     }
-    _changedWhileEditing = _promptController.text != widget.prompt;
   }
 
   @override
@@ -42,12 +45,6 @@ class _CorrectionPromptFieldState extends State<CorrectionPromptField> {
     _promptController.dispose();
     super.dispose();
   }
-
-  void _draftChanged() => setState(() {
-    if (_promptController.text == widget.prompt) {
-      _changedWhileEditing = false;
-    }
-  });
 
   bool get _saveEnabled =>
       widget.enabled &&
@@ -63,7 +60,7 @@ class _CorrectionPromptFieldState extends State<CorrectionPromptField> {
         enabled: widget.enabled,
         minLines: 5,
         maxLines: 12,
-        onChanged: (_) => _draftChanged(),
+        onChanged: widget.onChanged,
         decoration: InputDecoration(
           labelText: 'Correction prompt',
           errorText: _promptController.text.trim().isEmpty ? 'Required' : null,
@@ -75,7 +72,7 @@ class _CorrectionPromptFieldState extends State<CorrectionPromptField> {
         'Applies to the active preset. The app adds the required response '
         'format automatically.',
       ),
-      if (_changedWhileEditing)
+      if (widget.changedWhileEditing)
         const Text(
           'The correction prompt changed while you were editing. '
           'Saving will replace that change with your draft.',

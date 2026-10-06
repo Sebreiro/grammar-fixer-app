@@ -69,6 +69,7 @@ void main() {
     'CAP-8: fresh URL setup activates one provider and keeps Claude configuration',
     (tester) async {
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'AI');
       expect(baseUrl, findsNothing);
       expect(model, findsNothing);
       expect(keyField, findsNothing);
@@ -113,6 +114,7 @@ void main() {
     'CAP-8: masked key entry saves to the keyring and clears only after success',
     (tester) async {
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'AI');
       await choose(tester, ProviderConfig.compatibleProviderId);
       final field = tester.widget<TextField>(keyField);
       expect(field.obscureText, isTrue);
@@ -133,6 +135,7 @@ void main() {
       writer.result = SecretWriteResult.unavailable;
       harness.configStore.writeError = StateError('private-key');
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'AI');
       await choose(tester, ProviderConfig.compatibleProviderId);
       await tester.enterText(keyField, 'private-key');
       await press(tester, 'Save API key');
@@ -157,6 +160,7 @@ void main() {
     (tester) async {
       writer.result = SecretWriteResult.unavailable;
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'AI');
       await choose(tester, ProviderConfig.compatibleProviderId);
       await tester.enterText(keyField, ' private-key ');
       await press(tester, 'Save API key');
@@ -188,6 +192,7 @@ void main() {
       final gate = Completer<void>();
       harness.configStore.writeGate = gate;
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'AI');
       await choose(tester, ProviderConfig.compatibleProviderId);
       await tester.enterText(keyField, 'private-key');
       final save = find.widgetWithText(FilledButton, 'Save API key');
@@ -216,6 +221,7 @@ void main() {
       final gate = Completer<void>();
       writer.gate = gate;
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'AI');
       await choose(tester, ProviderConfig.compatibleProviderId);
       await tester.enterText(keyField, 'private-key');
       final save = find.widgetWithText(FilledButton, 'Save API key');
@@ -245,6 +251,7 @@ void main() {
         model: 'model',
       );
       await harness.pumpSettings(tester);
+      await harness.selectCategory(tester, 'AI');
       harness.configStore.writeError = StateError('read-only');
       await choose(tester, 'claude-agent-sdk');
       expect(

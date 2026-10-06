@@ -1,0 +1,5 @@
+Command: /home/vscode/flutter/bin/cache/dart-sdk/bin/dart analyze
+Run count: 1
+Exit code: 0
+Analyzing workspace...
+No issues found!

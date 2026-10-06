@@ -781,7 +781,7 @@ Future<void> _createHiddenWindow() async {
     CorrectionPanel.minimumPanelHeightFor(textScaler) + 60,
   );
   final preferredMinimum = Size(480, minimumHeight);
-  final preferredSize = Size(640, math.max(520.0, minimumHeight));
+  final preferredSize = Size(840, math.max(650.0, minimumHeight));
   final available = _startupDisplaySize();
   if (available == null) {
     return (
