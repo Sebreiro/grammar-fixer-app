@@ -28,20 +28,33 @@ Future<void> main(List<String> args) async {
     try {
       await registrar.grab(
         HotkeyGrab(
-          modifiers: <HotkeyModifier>{HotkeyModifier.control, HotkeyModifier.shift},
+          modifiers: <HotkeyModifier>{
+            HotkeyModifier.control,
+            HotkeyModifier.shift,
+          },
           usbHidUsage: usage,
         ),
       );
     } on Object catch (error) {
-      stdout.writeln('RESULT $label grab=REFUSED(${error.runtimeType}) detail=$error');
+      stdout.writeln(
+        'RESULT $label grab=REFUSED(${error.runtimeType}) detail=$error',
+      );
       continue;
     }
     stdout.writeln('GRABBED $label');
     // Synthesise three presses through XTEST and count what the grab delivers.
     for (var i = 0; i < 3; i += 1) {
-      final r = await Process.run('xdotool', <String>[
-        'key', '--clearmodifiers', 'ctrl+shift+${_xdotoolName(label)}',
-      ], environment: <String, String>{'DISPLAY': Platform.environment['DISPLAY'] ?? ':99'});
+      final r = await Process.run(
+        'xdotool',
+        <String>[
+          'key',
+          '--clearmodifiers',
+          'ctrl+shift+${_xdotoolName(label)}',
+        ],
+        environment: <String, String>{
+          'DISPLAY': Platform.environment['DISPLAY'] ?? ':99',
+        },
+      );
       if (r.exitCode != 0) {
         stdout.writeln('  xdotool failed: ${r.stderr}');
       }
