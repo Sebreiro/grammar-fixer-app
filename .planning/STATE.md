@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 milestone: v1.0
 status: Awaiting next milestone
 stopped_at: Phase 02 complete — all phases complete
-last_updated: "2026-10-05T10:54:33.080Z"
-last_activity: 2026-10-05
-last_activity_desc: "Completed quick task 261005-2g5: Apply focused prototype to Flutter with stacked suggestions and categorized Settings"
-state_head: 4d97b45d3d13d6acb617a947ec3859d4d0fa0305
+last_updated: "2026-10-06T21:55:53.820386Z"
+last_activity: 2026-10-06
+last_activity_desc: "Completed quick task 261006-jbt: Squash compact focused changes, verify release 1.1.0+2 on dev, align local main/dev, and build local AppImage; no push"
+state_head: a5789fec07b292fc2be6303745063aba75a6299b
 progress:
   total_phases: 2
   completed_phases: 2
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-26 after v1.0)
 Phase: Milestone v1.0 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-05 - Completed quick task 261005-2g5: Apply focused prototype to Flutter with stacked suggestions and categorized Settings
+Last activity: 2026-10-06 - Completed quick task 261006-jbt: Squash compact focused changes, verify release 1.1.0+2 on dev, align local main/dev, and build local AppImage; no push
 
 ## Performance Metrics
 
@@ -256,6 +256,7 @@ None yet.
 | 261003-7im | Improve the HTML prototype with the focused command panel design brief | 2026-10-03 | 9c40d88 | Verified | [261003-7im-improve-the-html-prototype-with-the-focu](./quick/261003-7im-improve-the-html-prototype-with-the-focu/) |
 | 261003-om4 | Make the HTML main panel compact with stacked suggestion rows while preserving Settings | 2026-10-03 | 3f7fcba | Verified | [261003-om4-make-the-html-main-panel-compact-with-st](./quick/261003-om4-make-the-html-main-panel-compact-with-st/) |
 | 261005-2g5 | Apply focused prototype to Flutter with stacked suggestions and categorized Settings | 2026-10-05 | 4d97b45 | Needs Review | [261005-2g5-apply-design-prototype-prototype-ui-base](./quick/261005-2g5-apply-design-prototype-prototype-ui-base/) |
+| 261006-jbt | Squash compact focused changes, verify release 1.1.0+2 on dev, align local main/dev, and build local AppImage; no push | 2026-10-06 | a5789fe | Verified | [261006-jbt-squash-compact-focused-branch-into-dev-v](./quick/261006-jbt-squash-compact-focused-branch-into-dev-v/) |
 
 ### Roadmap Evolution
 
